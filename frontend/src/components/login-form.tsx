@@ -73,6 +73,9 @@ export function LoginForm() {
               {error}
             </p>
           )}
+          <Link href="/forgot" className="-mt-2 justify-self-end t-small font-medium text-fg-2 underline underline-offset-4 hover:text-fg-1">
+            Forgot password?
+          </Link>
           <Button type="submit" variant="primary" loading={busy} className="h-11 w-full">
             Log in
           </Button>

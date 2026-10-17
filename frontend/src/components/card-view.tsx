@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import * as api from "@/lib/api";
 import { applyEdits, hasEdits } from "@/lib/edits";
-import { roleLabel, roleNoun } from "@/lib/roles";
+import { isLead, roleLabel, roleNoun } from "@/lib/roles";
 import { useSession } from "@/lib/session";
 import type { CardEdits, CardView as CardData, CommentView, EditableField } from "@/lib/types";
 import { cn, firstName, timeAgo } from "@/lib/utils";
@@ -65,6 +65,7 @@ function LoadedCard({ card, onCardChange }: { card: CardData; onCardChange: (car
   const { user } = useSession();
   const [edits, setEdits] = useState<CardEdits>({});
   const [approving, setApproving] = useState(false);
+  const [reexplaining, setReexplaining] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [comments, setComments] = useState<CommentView[]>(card.comments);
   const [ask, setAsk] = useState<{ open: boolean; target: AskTarget | null }>({ open: false, target: null });
@@ -89,6 +90,20 @@ function LoadedCard({ card, onCardChange }: { card: CardData; onCardChange: (car
 
   const editField = (field: EditableField, value: string) =>
     setEdits((e) => ({ ...e, levels: { ...e.levels, [levelKey]: { ...e.levels?.[levelKey], [field]: value } } }));
+
+  const onReexplain = async () => {
+    setReexplaining(true);
+    try {
+      const { card: fresh } = await api.reexplain(card.id);
+      setEdits({});
+      onCardChange({ ...fresh, comments });
+      toast("Explained again from the latest code.");
+    } catch (e) {
+      toast(e instanceof api.ApiError && e.detail ? e.detail : "That didn't work. Try again in a minute.");
+    } finally {
+      setReexplaining(false);
+    }
+  };
 
   const onApprove = async () => {
     setApproving(true);
@@ -143,10 +158,17 @@ function LoadedCard({ card, onCardChange }: { card: CardData; onCardChange: (car
           <RiskBadge risk={explanation.risk} reason={explanation.riskReason} />
         </header>
 
-        <p className="mt-6 t-small text-fg-2">
-          Explained for you as {roleNoun(levelKey)}.
-          {reviewing && " This is how you'll read it; your manager gets their own version. Select any text to fix it."}
-        </p>
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+          <p className="t-small text-fg-2">
+            Explained for you as {roleNoun(levelKey)}.
+            {reviewing && " This is how you'll read it; your manager gets their own version. Select any text to fix it."}
+          </p>
+          {(card.viewer.canReview || isLead(levelKey)) && card.source !== "demo" && (
+            <Button variant="ghost" className="-mr-4" loading={reexplaining} onClick={onReexplain}>
+              Explain again
+            </Button>
+          )}
+        </div>
 
         <div className="mt-4 grid items-stretch gap-6 card:grid-cols-12">
           <div className="card:col-span-7">

@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
+import { after } from "next/server";
 import { publicUser, requireUser, userIdFor } from "@/lib/auth";
 import { ApiError, json, preflight, readJson, route } from "@/lib/http";
 import { CAN_ADD, descendants, orgMembers, personOf, requireOrg } from "@/lib/org";
+import { mailConfigured, sendInvite } from "@/lib/mail";
 import { memberSchema } from "@/lib/profile";
 import { store } from "@/lib/store";
 import type { StoredUser } from "@/lib/types";
@@ -59,5 +61,9 @@ export const POST = route(async (req) => {
   };
   await store.set("users", id, member);
   await store.set("invites", code, { userId: id, orgId: org.id });
-  return json({ member: personOf(publicUser(member), [...users, member]), inviteCode: code }, 201);
+  const emailed = mailConfigured() && !member.email.endsWith("@demo.rosetta.dev");
+  if (emailed) {
+    after(() => sendInvite({ to: member.email, name: member.name, inviter: me.name, orgName: org.name, role: member.role, code }));
+  }
+  return json({ member: personOf(publicUser(member), [...users, member]), inviteCode: code, emailed }, 201);
 });

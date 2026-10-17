@@ -7,6 +7,7 @@ import { env } from "./env";
 import { fetchChange, type Change, type RawFile } from "./github";
 import type { ParsedLink } from "./github-url";
 import { ApiError } from "./http";
+import { sendNewChange } from "./mail";
 import { store } from "./store";
 import type { Explanation, Org, StoredCard, User } from "./types";
 
@@ -17,6 +18,9 @@ import type { Explanation, Org, StoredCard, User } from "./types";
 
 const cacheId = (repo: string, sha: string) =>
   createHash("sha256").update(`${repo}@${sha}`.toLowerCase()).digest("hex").slice(0, 24);
+
+/** Drops the cached explanation so the next request asks the model again. */
+export const forgetExplanation = (repo: string, sha: string) => store.remove("explanations", cacheId(repo, sha));
 
 /** The org member who wrote a change, matched by GitHub username. */
 export const authorFor = (login: string, users: User[]) =>
@@ -94,5 +98,17 @@ export async function ingestLink(org: Org, link: ParsedLink, users: User[], sour
   const prepared = prepare(await fetchChange(link));
   const card = toCard(id, org, prepared, await explanationFor(prepared), users, { source });
   await store.set("cards", id, card);
+  const author = users.find((u) => u.id === card.authorUserId);
+  const manager = author && users.find((u) => u.id === author.managerId);
+  if (author && manager) {
+    await sendNewChange({
+      to: manager.email,
+      managerName: manager.name,
+      authorName: author.name,
+      title: card.explanation.title,
+      summary: card.explanation.levels[manager.role].summary,
+      cardId: card.id,
+    });
+  }
   return card;
 }

@@ -195,7 +195,34 @@ const humanize = (key: string) => {
 const nearest = (index: number) =>
   LEVELS.map((_, j) => j).sort((a, b) => Math.abs(a - index) - Math.abs(b - index) || b - a);
 
-export function parseExplanation(raw: unknown): Omit<Explanation, "files"> {
+/** A graph's shape by step keys, ignoring ids: equal shapes mean "nothing visibly changed". */
+function shape(g: FlowGraph) {
+  const keyById = new Map(g.nodes.map((n) => [n.id, n.key]));
+  const nodes = g.nodes.map((n) => `${n.key}:${n.kind ?? "step"}`).sort();
+  const edges = g.edges.map(([a, b, l]) => `${keyById.get(a)}>${keyById.get(b)}:${l ?? ""}`).sort();
+  return JSON.stringify([nodes, edges]);
+}
+
+export class SameFlowError extends Error {
+  constructor() {
+    super("Before and after flowcharts are identical");
+  }
+}
+
+/**
+ * Strict: identical before/after graphs are rejected so the model tries again.
+ * Lenient (last resort): the before graph is dropped instead of showing two copies.
+ */
+export function parseExplanation(raw: unknown, { strict = true }: { strict?: boolean } = {}): Omit<Explanation, "files"> {
+  const parsed = parseExplanationInner(raw);
+  if (parsed.flow.before && shape(parsed.flow.before) === shape(parsed.flow.after)) {
+    if (strict) throw new SameFlowError();
+    return { ...parsed, flow: { before: null, after: parsed.flow.after } };
+  }
+  return parsed;
+}
+
+function parseExplanationInner(raw: unknown): Omit<Explanation, "files"> {
   const data = rawExplanation.parse(raw);
   const beforeResult = data.flow.before?.nodes.length ? cleanGraph(data.flow.before, "b", 10) : null;
   const afterResult = cleanGraph(data.flow.after, "a", 14);

@@ -8,6 +8,7 @@ import {
   levelsTextSchema,
   parseAsk,
   parseExplanation,
+  SameFlowError,
   parseLevelsText,
   parseText,
   textSchema,
@@ -33,7 +34,7 @@ ${levelGuide}
 The flowchart must actually explain how the change works, not just name it:
 1. "after" shows the real mechanism in 5 to 10 nodes: where it starts, each meaningful step, every decision (kind "decision", with labelled yes/no or case edges), stored data (kind "data"), and every distinct outcome (kind "end"). Show each branch separately, e.g. one node per server, per retry outcome, per cache hit or miss.
 2. Use a group to box the parts this change added or the things that belong together (a server pool, a new module).
-3. "before" shows how it worked previously, in 2 to 6 nodes, with the same node keys for steps that didn't change. null when there was no meaningful before state.
+3. "before" shows how it worked previously, in 2 to 6 nodes. Steps that didn't change keep the same key in both graphs. Every step this change added, removed or altered MUST have a different key in before and after (e.g. "default_model_llama" before, "default_model_gpt_oss" after), and its labels must name the concrete difference (old value vs new value, old behaviour vs new behaviour). The before and after graphs must never be identical. null when there was no meaningful before state.
 4. "walkthrough" traces 3 or 4 concrete examples through the after graph (path = the node ids visited, in order, loops allowed). Use specific values: request numbers, timings, ids, amounts. Each level tells every step in one sentence in its own words.
 5. The structure is identical for every reader; only the text changes. Every node key, group key and edge label key needs a label at every level (at most 6 words).
 
@@ -67,7 +68,31 @@ Changed files${input.truncated ? " (trimmed to the most changed ones)" : ""}: ${
 Diff:
 ${input.diff}`;
 
-  return generateJson({ name: "explain", system: EXPLAIN_SYSTEM, prompt, schema: explanationSchema, parse: parseExplanation });
+  // If every attempt draws before and after identically, keep the first one
+  // with the before graph dropped, rather than failing or showing two copies.
+  let lastResort: Omit<Explanation, "files"> | null = null;
+  try {
+    return await generateJson({
+      name: "explain",
+      system: EXPLAIN_SYSTEM,
+      prompt,
+      schema: explanationSchema,
+      parse: (raw) => {
+        try {
+          return parseExplanation(raw);
+        } catch (error) {
+          if (error instanceof SameFlowError) lastResort ??= parseExplanation(raw, { strict: false });
+          throw error;
+        }
+      },
+      // A little thinking helps the flowchart; capped so it stays well under the limit.
+      thinkingBudget: 2048,
+      timeoutMs: 150_000,
+    });
+  } catch (error) {
+    if (lastResort) return lastResort;
+    throw error;
+  }
 }
 
 export async function answerQuestion(input: {

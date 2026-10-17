@@ -6,6 +6,7 @@ import { ApiError, json, preflight, readJson, route } from "@/lib/http";
 import { canMessage, canSeeCard, orgMembers } from "@/lib/org";
 import { store } from "@/lib/store";
 import { ticketView } from "@/lib/tickets";
+import { sendQuestion } from "@/lib/mail";
 import { translateTicketMessageLater } from "@/lib/translate";
 import type { StoredCard, Ticket } from "@/lib/types";
 
@@ -77,5 +78,6 @@ export const POST = route(async (req) => {
   await store.set("tickets", ticket.id, ticket);
   // Send at once; the version for each reader is written in the background.
   after(() => translateTicketMessageLater(ticket.id, ticket.messages[0].id, me.name, card?.explanation.title));
+  after(() => sendQuestion({ to: to.email, toName: to.name, fromName: me.name, subject: input.subject, text: input.text, ticketId: ticket.id }));
   return json({ ticket: ticketView(ticket, me, users, card?.explanation.title) }, 201);
 });

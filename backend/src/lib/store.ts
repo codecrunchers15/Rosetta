@@ -15,7 +15,8 @@ export type Collection =
   | "explanations"
   | "notes"
   | "comments"
-  | "tickets";
+  | "tickets"
+  | "resets";
 
 interface Store {
   get<T>(collection: Collection, id: string): Promise<T | null>;
@@ -47,13 +48,31 @@ class FirestoreStore implements Store {
     })();
   }
 
+  /**
+   * Firestore can't hold arrays inside arrays (our flowchart edges are
+   * [from, to] pairs), so each document is stored as JSON in `_json`, with
+   * its top-level text, number and boolean fields copied alongside for queries.
+   */
+  private encode(data: object) {
+    const fields: Record<string, unknown> = { _json: JSON.stringify(data) };
+    for (const [key, value] of Object.entries(data)) {
+      if (["string", "number", "boolean"].includes(typeof value)) fields[key] = value;
+    }
+    return fields;
+  }
+
+  private decode<T>(raw: Record<string, unknown> | undefined): T | null {
+    if (!raw) return null;
+    return (typeof raw._json === "string" ? JSON.parse(raw._json) : raw) as T;
+  }
+
   async get<T>(collection: Collection, id: string) {
     const snap = await (await this.db).collection(collection).doc(id).get();
-    return snap.exists ? (snap.data() as T) : null;
+    return snap.exists ? this.decode<T>(snap.data()) : null;
   }
 
   async set<T extends object>(collection: Collection, id: string, data: T) {
-    await (await this.db).collection(collection).doc(id).set(data);
+    await (await this.db).collection(collection).doc(id).set(this.encode(data));
   }
 
   async remove(collection: Collection, id: string) {
@@ -62,7 +81,7 @@ class FirestoreStore implements Store {
 
   async list<T>(collection: Collection, field: string, value: string) {
     const snap = await (await this.db).collection(collection).where(field, "==", value).get();
-    return snap.docs.map((d) => d.data() as T);
+    return snap.docs.map((d) => this.decode<T>(d.data())!);
   }
 }
 

@@ -45,13 +45,15 @@ async function toError(res: Response): Promise<ApiError> {
   return new ApiError("unavailable");
 }
 
-async function call<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+async function call<T>(path: string, init?: { method?: string; body?: unknown; timeoutMs?: number }): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
       method: init?.method ?? "GET",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+      // Never leave a button spinning: give up after 20 s and show an error.
+      signal: AbortSignal.timeout(init?.timeoutMs ?? 20_000),
     });
   } catch {
     throw new ApiError("network");
@@ -85,6 +87,9 @@ export type WorkspaceSignup = {
 export const signup = (input: WorkspaceSignup) => call<Session>("/api/auth/signup", { method: "POST", body: input });
 export const login = (email: string, password: string) =>
   call<Session>("/api/auth/login", { method: "POST", body: { email, password } });
+export const forgotPassword = (email: string) => call<{ sent: true }>("/api/auth/forgot", { method: "POST", body: { email } });
+export const resetPassword = (token: string, password: string) =>
+  call<Session>("/api/auth/reset", { method: "POST", body: { token, password } });
 export const getInvite = (code: string) =>
   call<{ name: string; email: string; role: Role; title?: string; githubLogin?: string; orgName: string; invitedBy: string | null }>(
     `/api/invites/${encodeURIComponent(code)}`,
@@ -99,7 +104,7 @@ export const updateMe = async (patch: Partial<Pick<User, "name" | "title" | "git
 
 export const getTeam = () => call<TeamView>("/api/team");
 export const addMember = (input: { name: string; email: string; role: Role; title?: string; githubLogin?: string; teamName?: string; managerId?: string }) =>
-  call<{ member: Person; inviteCode: string }>("/api/team/members", { method: "POST", body: input });
+  call<{ member: Person; inviteCode: string; emailed: boolean }>("/api/team/members", { method: "POST", body: input });
 export const updateMember = (
   id: string,
   patch: { title?: string; githubLogin?: string; teamName?: string; role?: Role; managerId?: string },
@@ -114,6 +119,8 @@ export const seedDemo = () =>
 
 export const getFeed = (filters: { author?: string; team?: string; status?: string } = {}) => call<Feed>(`/api/feed${q(filters)}`);
 export const getCard = (id: string) => call<CardView>(`/api/cards/${encodeURIComponent(id)}`);
+export const reexplain = (id: string) =>
+  call<{ card: CardView }>(`/api/cards/${encodeURIComponent(id)}/reexplain`, { method: "POST", timeoutMs: 240_000 });
 export const getForMe = (id: string) => call<{ note: string | null }>(`/api/cards/${encodeURIComponent(id)}/for-me`);
 export const approve = (cardId: string, edits: CardEdits) =>
   call<{ card: CardView }>("/api/approve", { method: "POST", body: { cardId, edits } });
@@ -149,6 +156,8 @@ export async function explain(url: string, onEvent: (event: ExplainEvent) => voi
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ url }),
+      // Explaining a new commit with the model can take a while.
+      signal: AbortSignal.timeout(240_000),
     });
   } catch {
     throw new ApiError("network");

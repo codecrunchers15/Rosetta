@@ -20,6 +20,16 @@ export const env = {
     .map((o) => o.trim())
     .filter(Boolean),
 
+  /** Email. Gmail by default: SMTP_USER is the address, SMTP_PASS a Gmail app password. */
+  smtpUser: process.env.SMTP_USER || "",
+  smtpPass: (process.env.SMTP_PASS || "").replace(/\s+/g, ""),
+  smtpHost: process.env.SMTP_HOST || "smtp.gmail.com",
+  smtpPort: Number(process.env.SMTP_PORT || 465),
+  smtpFrom: process.env.SMTP_FROM || "",
+
+  /** The frontend's address, for links inside emails. */
+  appUrl: (process.env.APP_URL || "http://localhost:3000").replace(/\/$/, ""),
+
   /** Diffs above this many changed lines are trimmed (FR-1.4). */
   maxDiffLines: Number(process.env.MAX_DIFF_LINES || 400),
 };

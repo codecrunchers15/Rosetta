@@ -14,6 +14,7 @@ type SessionValue = {
   status: Status;
   createWorkspace: (input: api.WorkspaceSignup) => Promise<User>;
   join: (input: Parameters<typeof api.join>[0]) => Promise<User>;
+  resetPassword: (token: string, password: string) => Promise<User>;
   login: (email: string, password: string) => Promise<User>;
   updateProfile: (patch: Parameters<typeof api.updateMe>[0]) => Promise<User>;
   logout: () => void;
@@ -83,6 +84,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       status,
       createWorkspace: async (input) => start((await api.signup(input)).token),
       join: async (input) => start((await api.join(input)).token),
+      resetPassword: async (token, password) => start((await api.resetPassword(token, password)).token),
       login: async (email, password) => start((await api.login(email, password)).token),
       updateProfile: async (patch) => {
         const next = await api.updateMe(patch);

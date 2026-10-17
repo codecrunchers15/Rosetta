@@ -153,7 +153,7 @@ function AddMember({ team, onAdded }: { team: TeamView; onAdded: () => void }) {
   const [managerId, setManagerId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [invite, setInvite] = useState<{ name: string; code: string } | null>(null);
+  const [invite, setInvite] = useState<{ name: string; code: string; email: string; emailed: boolean } | null>(null);
   const technical = role === "engineer" || role === "senior" || role === "intern";
 
   const onSubmit = async (e: FormEvent) => {
@@ -170,7 +170,7 @@ function AddMember({ team, onAdded }: { team: TeamView; onAdded: () => void }) {
         teamName: role === "manager" ? teamName.trim() || undefined : undefined,
         managerId: role !== "manager" && managerId ? managerId : undefined,
       });
-      setInvite({ name: r.member.name, code: r.inviteCode });
+      setInvite({ name: r.member.name, code: r.inviteCode, email: email.trim(), emailed: r.emailed });
       setName("");
       setEmail("");
       setTitle("");
@@ -195,6 +195,9 @@ function AddMember({ team, onAdded }: { team: TeamView; onAdded: () => void }) {
         <div className="mt-4 rounded-sm bg-surface-2 p-4">
           <p className="t-small text-fg-1">
             Invite for {invite.name}: <span className="font-mono font-semibold">{invite.code}</span>
+          </p>
+          <p className="mt-1 t-small text-fg-2">
+            {invite.emailed ? `We emailed the join link to ${invite.email}.` : "Share this link with them to join."}
           </p>
           <Button className="mt-3 h-8!" onClick={() => copy(link, "Invite link")}>
             Copy invite link

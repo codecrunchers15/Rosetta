@@ -15,6 +15,10 @@ export type JsonTask<T> = {
   /** Parses and repairs the raw model output; throws if unusable. */
   parse: (raw: unknown) => T;
   temperature?: number;
+  /** Tokens the model may spend thinking first. 0 = answer straight away (fastest). */
+  thinkingBudget?: number;
+  /** Per attempt. Big explanations need longer than quick rewrites. */
+  timeoutMs?: number;
 };
 
 export const aiConfigured = () => Boolean(env.geminiKey || env.fallbackKey);
@@ -32,9 +36,10 @@ async function gemini(task: JsonTask<unknown>): Promise<unknown> {
           responseMimeType: "application/json",
           responseSchema: task.schema,
           temperature: task.temperature ?? 0.4,
+          thinkingConfig: { thinkingBudget: task.thinkingBudget ?? 0 },
         },
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(task.timeoutMs ?? 45_000),
     },
   );
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -64,7 +69,7 @@ async function openAiCompatible(task: JsonTask<unknown>): Promise<unknown> {
         { role: "user", content: task.prompt },
       ],
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(task.timeoutMs ?? 45_000),
   });
   if (!res.ok) throw new Error(`Fallback ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
@@ -80,11 +85,16 @@ export async function generateJson<T>(task: JsonTask<T>): Promise<T> {
   }
   if (env.fallbackKey) attempts.push(["fallback", () => openAiCompatible(task)]);
 
+  let skipRetry = false;
   for (const [label, run] of attempts) {
+    // A timeout or an overloaded model won't recover in a second: go straight to the fallback.
+    if (label === "gemini retry" && skipRetry) continue;
     try {
       return task.parse(await run());
     } catch (error) {
-      console.warn(`[rosetta] ${task.name}: ${label} failed:`, error instanceof Error ? error.message : error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (/timeout|aborted| 503| 429/i.test(message)) skipRetry = true;
+      console.warn(`[rosetta] ${task.name}: ${label} failed:`, message.slice(0, 200));
     }
   }
   throw new ApiError("unavailable");
