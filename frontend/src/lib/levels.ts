@@ -4,7 +4,7 @@ export const LEVELS = [
   { key: "intern", label: "Intern" },
   { key: "manager", label: "Manager" },
   { key: "client", label: "Client" },
-  { key: "mom", label: "My mom" },
+  { key: "cmo", label: "CMO" },
 ] as const;
 
 export type LevelKey = (typeof LEVELS)[number]["key"];

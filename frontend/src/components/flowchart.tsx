@@ -2,14 +2,15 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { Mermaid } from "mermaid";
-import { changedNodeIds, nextNodes, orderedNodes, toMermaid, widestLabels } from "@/lib/flow";
-import { LEVELS, type LevelKey } from "@/lib/levels";
+import { changedNodeIds, nextNodes, orderedNodes, pathEdges, toMermaid } from "@/lib/flow";
 import type { Explanation, FlowGraph, LevelText } from "@/lib/types";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
+import { Button } from "./button";
 
 export type AskTarget = { nodeId: string; key: string; panel: "before" | "after" };
 
-let loader: Promise<{ mermaid: Mermaid; font: string }> | null = null;
+let loader: Promise<Mermaid> | null = null;
 
 function loadMermaid() {
   loader ??= import("mermaid").then(({ default: mermaid }) => {
@@ -17,11 +18,11 @@ function loadMermaid() {
     mermaid.initialize({
       startOnLoad: false,
       theme: "base",
+      look: "classic",
       securityLevel: "strict",
       suppressErrorRendering: true,
       fontFamily: font,
       htmlLabels: true,
-      look: "classic",
       themeVariables: {
         fontFamily: font,
         fontSize: "14px",
@@ -35,103 +36,49 @@ function loadMermaid() {
       },
       flowchart: {
         curve: "basis",
-        nodeSpacing: 32,
-        rankSpacing: 40,
+        nodeSpacing: 28,
+        rankSpacing: 44,
         htmlLabels: true,
-        wrappingWidth: 120,
+        wrappingWidth: 150,
         padding: 10,
         useMaxWidth: true,
       },
     });
-    return { mermaid, font };
+    return mermaid;
   });
   return loader;
 }
 
-type Props = {
-  explanation: Explanation;
-  active: number;
-  onAsk: (target: AskTarget) => void;
-  /** Inside the Story Card on narrow screens: no surface of its own. */
-  embedded?: boolean;
-};
-
-export function Flowchart({ explanation, active, onAsk, embedded = false }: Props) {
-  const { before, after } = explanation.flow;
-  const changed = useMemo(() => changedNodeIds(before, after), [before, after]);
-  const headingId = useId();
-  // A branching graph is too wide for half a column: stack Before over After.
-  const branches = [before, after].some((g) => g && hasBranch(g));
-
-  return (
-    <section
-      aria-labelledby={headingId}
-      className={cn(!embedded && "rounded-md bg-surface-1 p-6 shadow-elev-1")}
-    >
-      <h2 id={headingId} className="sr-only">
-        How it works, before and after
-      </h2>
-      <div className={cn("grid gap-6", before && !branches && "min-[480px]:grid-cols-2 min-[480px]:gap-4")}>
-        {before && (
-          <Panel
-            panel="before"
-            title="Before"
-            graph={before}
-            levels={explanation.levels}
-            active={active}
-            changed={changed}
-            onAsk={onAsk}
-          />
-        )}
-        <Panel
-          panel="after"
-          title="After"
-          isNew={!before}
-          graph={after}
-          levels={explanation.levels}
-          active={active}
-          changed={changed}
-          onAsk={onAsk}
-        />
-      </div>
-      <p className="mt-6 t-small text-fg-3">Select a box to ask why it works that way.</p>
-    </section>
-  );
-}
-
-type PanelProps = {
-  panel: "before" | "after";
-  title: string;
-  isNew?: boolean;
+type DiagramProps = {
   graph: FlowGraph;
-  levels: Record<LevelKey, LevelText>;
-  active: number;
+  labels: Record<string, string>;
   changed: Set<string>;
-  onAsk: (target: AskTarget) => void;
+  panel: "before" | "after";
+  /** Walkthrough: the path to light up; everything else dims. */
+  trace?: string[] | null;
+  onAsk?: (target: AskTarget) => void;
 };
 
-function Panel({ panel, title, isNew, graph, levels, active, changed, onAsk }: PanelProps) {
+/** One graph, drawn by Mermaid from our JSON at one reader's level. */
+export function FlowDiagram({ graph, labels, changed, panel, trace, onAsk }: DiagramProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"rendering" | "ready" | "failed">("rendering");
-  const renderId = `flow${useId().replace(/[^a-zA-Z0-9]/g, "")}${panel}`;
-
-  // Only the labels matter for drawing; summary edits shouldn't re-render.
-  const labelsKey = JSON.stringify(LEVELS.map((l) => levels[l.key].labels));
-  const levelsRef = useRef(levels);
-  levelsRef.current = levels;
+  const wide = useMediaQuery("(min-width: 900px)", true);
+  const direction = wide ? "LR" : "TD";
+  const renderId = `flow${useId().replace(/[^a-zA-Z0-9]/g, "")}${panel}${direction}`;
+  const labelsKey = JSON.stringify(labels);
 
   useEffect(() => {
     let cancelled = false;
     setStatus("rendering");
     (async () => {
       try {
-        const { mermaid, font } = await loadMermaid();
+        const mermaid = await loadMermaid();
         await document.fonts?.ready;
-        const sizing = widestLabels(graph, levelsRef.current, font);
-        const { svg } = await mermaid.render(renderId, toMermaid(graph, sizing, changed));
+        const { svg } = await mermaid.render(renderId, toMermaid(graph, JSON.parse(labelsKey), changed, direction));
         if (cancelled || !ref.current) return;
         ref.current.innerHTML = svg;
-        if (!decorate(ref.current, graph, levelsRef.current)) throw new Error("Unexpected Mermaid output");
+        decorate(ref.current, graph, JSON.parse(labelsKey), Boolean(onAsk));
         setStatus("ready");
       } catch {
         document.getElementById(`d${renderId}`)?.remove();
@@ -141,24 +88,27 @@ function Panel({ panel, title, isNew, graph, levels, active, changed, onAsk }: P
     return () => {
       cancelled = true;
     };
-  }, [graph, changed, labelsKey, renderId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, changed, labelsKey, renderId, direction]);
 
-  // Level change: crossfade labels in place. Boxes and arrows never move.
+  // Light up the walkthrough path.
   useEffect(() => {
-    if (status !== "ready" || !ref.current) return;
-    const level = LEVELS[active].key;
-    ref.current.querySelectorAll<SVGGElement>("g[data-ask]").forEach((g) => {
-      g.querySelectorAll<HTMLElement>("[data-level]").forEach((span) => {
-        span.dataset.active = String(Number(span.dataset.level) === active);
-      });
-      const key = g.dataset.key!;
-      g.setAttribute("aria-label", `Ask why: ${levelsRef.current[level].labels[key] ?? key}`);
+    const root = ref.current;
+    if (status !== "ready" || !root) return;
+    const nodes = new Set(trace ?? []);
+    const edges = pathEdges(trace ?? []);
+    root.toggleAttribute("data-tracing", Boolean(trace?.length));
+    root.querySelectorAll<SVGGElement>("g.node").forEach((g) => {
+      g.classList.toggle("is-on", nodes.has(g.dataset.node ?? ""));
     });
-  }, [active, status]);
+    root.querySelectorAll<SVGElement>("[data-edge-from]").forEach((el) => {
+      el.classList.toggle("is-on", edges.has(`${el.dataset.edgeFrom}>${el.dataset.edgeTo}`));
+    });
+  }, [trace, status]);
 
   const fromEvent = (target: EventTarget) => {
     const g = (target as Element).closest<SVGGElement>("g[data-ask]");
-    if (g) onAsk({ nodeId: g.dataset.ask!, key: g.dataset.key!, panel });
+    if (g && onAsk) onAsk({ nodeId: g.dataset.node!, key: g.dataset.key!, panel });
   };
   const onClick = (e: MouseEvent) => fromEvent(e.target);
   const onKeyDown = (e: KeyboardEvent) => {
@@ -167,19 +117,10 @@ function Panel({ panel, title, isNew, graph, levels, active, changed, onAsk }: P
     fromEvent(e.target);
   };
 
-  const level = LEVELS[active].key;
-  const label = (key: string) => levels[level].labels[key] ?? key;
-  const steps = orderedNodes(graph);
+  const label = (key: string) => labels[key] ?? key;
 
   return (
     <div className="min-w-0">
-      <div className="mb-4 flex items-center gap-2">
-        <h3 className="t-heading text-fg-1">{title}</h3>
-        {isNew && (
-          <span className="inline-flex h-6 items-center rounded-xs bg-surface-2 px-2 t-micro text-fg-2">New</span>
-        )}
-      </div>
-
       <div
         ref={ref}
         data-panel={panel}
@@ -187,40 +128,20 @@ function Panel({ panel, title, isNew, graph, levels, active, changed, onAsk }: P
         onKeyDown={onKeyDown}
         aria-hidden={status !== "ready" || undefined}
         className={cn(
-          "flow min-h-24 transition-opacity duration-200",
+          "flow min-h-32 transition-opacity duration-200",
           status === "ready" ? "opacity-100" : "opacity-0",
           status === "failed" && "hidden",
         )}
       />
-
-      {/* Text alternative; shown as the fallback when the chart can't render. */}
-      <ol className={cn(status === "failed" ? "grid gap-2" : "sr-only")} aria-label={`${title}, step by step`}>
-        {steps.map((node) => {
+      {/* Text version: always there for screen readers; shown if the chart can't render. */}
+      <ol className={cn(status === "failed" ? "grid gap-2" : "sr-only")} aria-label="Step by step">
+        {orderedNodes(graph).map((node) => {
           const next = nextNodes(graph, node.id);
-          if (status !== "failed") {
-            return (
-              <li key={node.id}>
-                {label(node.key)}
-                {next.length > 0 && `, then ${next.map((n) => label(n.key)).join(" or ")}`}
-              </li>
-            );
-          }
           return (
-            <li key={node.id}>
-              <button
-                type="button"
-                onClick={() => onAsk({ nodeId: node.id, key: node.key, panel })}
-                className={cn(
-                  "press w-full rounded-sm bg-surface-2 px-3 py-2 text-left t-small shadow-ring-strong",
-                  panel === "after" ? "text-fg-1" : "text-fg-2",
-                  changed.has(node.id) && "shadow-[0_0_0_2px_var(--color-steel)]",
-                )}
-              >
-                {label(node.key)}
-                {next.length > 0 && (
-                  <span className="text-fg-3">, then {next.map((n) => label(n.key)).join(" or ")}</span>
-                )}
-              </button>
+            <li key={node.id} className={cn(status === "failed" && "rounded-sm bg-surface-2 px-3 py-2 t-small text-fg-1 shadow-ring")}>
+              {label(node.key)}
+              {next.length > 0 &&
+                `, then ${next.map((n) => (n.labelKey ? `${label(n.node.key)} (${label(n.labelKey)})` : label(n.node.key))).join(" or ")}`}
             </li>
           );
         })}
@@ -229,38 +150,158 @@ function Panel({ panel, title, isNew, graph, levels, active, changed, onAsk }: P
   );
 }
 
-function hasBranch(graph: FlowGraph) {
-  const out = new Map<string, number>();
-  for (const [from] of graph.edges) out.set(from, (out.get(from) ?? 0) + 1);
-  return [...out.values()].some((n) => n > 1);
-}
-
-/** Makes each node a button and stacks its six labels for crossfading. */
-function decorate(root: HTMLElement, graph: FlowGraph, levels: Record<LevelKey, LevelText>) {
-  const groups = root.querySelectorAll<SVGGElement>("g.node");
-  let found = 0;
-  groups.forEach((g) => {
+/** Tags nodes and edges with our ids, and makes nodes buttons when asking is on. */
+function decorate(root: HTMLElement, graph: FlowGraph, labels: Record<string, string>, askable: boolean) {
+  root.querySelectorAll<SVGGElement>("g.node").forEach((g) => {
     const id = g.dataset.id ?? g.id.match(/flowchart-(.+)-\d+$/)?.[1];
     const node = graph.nodes.find((n) => n.id === id);
-    const labelEl = g.querySelector(".nodeLabel");
-    if (!node || !labelEl) return;
-    found++;
-
-    g.dataset.ask = node.id;
+    if (!node) return;
+    g.dataset.node = node.id;
     g.dataset.key = node.key;
-    g.setAttribute("tabindex", "0");
-    g.setAttribute("role", "button");
-
-    const stack = document.createElement("span");
-    stack.className = "swap swap-inline";
-    LEVELS.forEach((level, i) => {
-      const span = document.createElement("span");
-      span.dataset.level = String(i);
-      span.dataset.active = "false";
-      span.textContent = levels[level.key].labels[node.key] ?? node.key;
-      stack.append(span);
-    });
-    labelEl.replaceChildren(stack);
+    if (askable) {
+      g.dataset.ask = "";
+      g.setAttribute("tabindex", "0");
+      g.setAttribute("role", "button");
+      g.setAttribute("aria-label", `Ask why: ${labels[node.key] ?? node.key}`);
+    }
   });
-  return found === graph.nodes.length;
+  // Edge paths and their labels carry data-id = L_<from>_<to>_<n>.
+  root.querySelectorAll<SVGElement>("[data-id^='L_']").forEach((el) => {
+    const [, from, to] = (el.dataset.id ?? "").split("_");
+    if (!from || !to) return;
+    const target = el.closest("g.edgeLabel") ?? el;
+    (target as SVGElement).dataset.edgeFrom = from;
+    (target as SVGElement).dataset.edgeTo = to;
+  });
+}
+
+/* ------------------------------------------------------------------ */
+
+type HowProps = {
+  explanation: Explanation;
+  level: LevelText;
+  onAsk?: (target: AskTarget) => void;
+};
+
+/**
+ * "How it works": the before/after flowchart plus a worked example that
+ * lights up its path one step at a time.
+ */
+export function HowItWorks({ explanation, level, onAsk }: HowProps) {
+  const { before, after } = explanation.flow;
+  const changed = useMemo(() => changedNodeIds(before, after), [before, after]);
+  const [panel, setPanel] = useState<"before" | "after">("after");
+  const steps = explanation.walkthrough?.steps ?? [];
+  const texts = level.walkthrough?.steps ?? [];
+  const hasWalk = panel === "after" && steps.length > 0 && texts.length === steps.length;
+  const [step, setStep] = useState<number | null>(null);
+  const trace = hasWalk && step !== null ? steps[step].path : null;
+
+  return (
+    <section aria-labelledby="how-heading" className="rounded-md bg-surface-1 p-6 shadow-elev-1 sm:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 id="how-heading" className="t-heading text-fg-1">
+            How it works
+          </h2>
+          <p className="mt-1 t-small text-fg-3">
+            {panel === "after" ? "After this change." : "Before this change."}
+            {onAsk && " Select any box to ask why."}
+          </p>
+        </div>
+        {before ? (
+          <div role="tablist" aria-label="Before or after" className="inline-grid grid-cols-2 rounded-sm bg-surface-2 p-1 shadow-ring">
+            {(["before", "after"] as const).map((p) => (
+              <button
+                key={p}
+                role="tab"
+                type="button"
+                aria-selected={panel === p}
+                onClick={() => {
+                  setPanel(p);
+                  setStep(null);
+                }}
+                className={cn(
+                  "press h-8 rounded-[6px] px-4 t-small font-medium",
+                  panel === p ? "bg-surface-1 text-fg-1 shadow-elev-1" : "text-fg-2 hover:text-fg-1",
+                )}
+              >
+                {p === "before" ? "Before" : "After"}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="inline-flex h-6 items-center rounded-xs bg-surface-2 px-2 t-micro text-fg-2">New</span>
+        )}
+      </div>
+
+      <div className="mt-6">
+        <FlowDiagram
+          key={panel}
+          graph={panel === "after" ? after : before!}
+          labels={level.labels}
+          changed={panel === "after" ? changed : new Set()}
+          panel={panel}
+          trace={trace}
+          onAsk={onAsk}
+        />
+      </div>
+
+      {hasWalk && (
+        <div className="mt-8 rounded-sm bg-surface-2 p-5 shadow-ring">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="t-body font-semibold text-fg-1">{level.walkthrough!.title}</h3>
+            <div className="flex items-center gap-1" aria-hidden>
+              {steps.map((_, i) => (
+                <span
+                  key={i}
+                  className={cn(
+                    "size-2 rounded-full transition-[background-color] duration-150",
+                    step !== null && i <= step ? "bg-steel" : "bg-(--ring-strong)",
+                  )}
+                />
+              ))}
+            </div>
+          </div>
+          <p className="mt-3 min-h-[3.2em] t-body text-fg-1" aria-live="polite">
+            {step === null ? (
+              <span className="text-fg-2">Step through a real example and watch its path light up in the chart.</span>
+            ) : (
+              <>
+                <span className="t-small font-medium text-fg-3">
+                  Step {step + 1} of {steps.length}.{" "}
+                </span>
+                {texts[step]}
+              </>
+            )}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {step === null ? (
+              <Button variant="primary" onClick={() => setStep(0)}>
+                Start the example
+              </Button>
+            ) : (
+              <>
+                <Button disabled={step === 0} onClick={() => setStep((s) => Math.max(0, (s ?? 0) - 1))}>
+                  Previous
+                </Button>
+                {step < steps.length - 1 ? (
+                  <Button variant="primary" onClick={() => setStep((s) => (s ?? 0) + 1)}>
+                    Next step
+                  </Button>
+                ) : (
+                  <Button variant="primary" onClick={() => setStep(0)}>
+                    Play again
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => setStep(null)}>
+                  Clear
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }

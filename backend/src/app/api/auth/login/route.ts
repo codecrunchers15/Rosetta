@@ -1,22 +1,21 @@
-import { issueToken, userIdFor } from "@/lib/auth";
-import { json, preflight, readJson, route } from "@/lib/http";
-import { profileSchema } from "@/lib/profile";
+import { z } from "zod";
+import { checkPassword, issueToken, publicUser, userIdFor } from "@/lib/auth";
+import { ApiError, json, preflight, readJson, route } from "@/lib/http";
 import { store } from "@/lib/store";
-import type { User } from "@/lib/types";
+import type { StoredUser } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const OPTIONS = preflight;
 
-/**
- * POST /api/auth/login { name, email, role, … } → { token, user, created }
- * Creates the profile card, or updates it when the email already exists.
- */
+const body = z.object({ email: z.email().trim().toLowerCase(), password: z.string().min(1).max(200) });
+
+/** POST /api/auth/login { email, password } → { token, user } */
 export const POST = route(async (req) => {
-  const profile = await readJson(req, profileSchema);
-  const id = userIdFor(profile.email);
-  const existing = await store.get<User>("users", id);
-  const now = new Date().toISOString();
-  const user: User = { ...existing, ...profile, id, createdAt: existing?.createdAt ?? now, updatedAt: now };
-  await store.set("users", id, user);
-  return json({ token: issueToken(id), user, created: !existing });
+  const { email, password } = await readJson(req, body);
+  const user = await store.get<StoredUser>("users", userIdFor(email));
+  // Same answer for an unknown email and a wrong password.
+  if (!user || !(await checkPassword(password, user.passwordHash ?? ""))) {
+    throw new ApiError("invalid_credentials", "That email and password don't match.");
+  }
+  return json({ token: issueToken(user.id), user: publicUser(user) });
 });

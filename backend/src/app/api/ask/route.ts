@@ -1,86 +1,72 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { aiConfigured } from "@/lib/ai/provider";
 import { answerQuestion } from "@/lib/ai/tasks";
-import { optionalUser } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
+import { demoSampleFor } from "@/lib/cards";
 import { diffText, trimFiles } from "@/lib/diff";
 import { env } from "@/lib/env";
-import { filesFor, postComment } from "@/lib/github";
+import { filesFor } from "@/lib/github";
 import { ApiError, json, preflight, readJson, route } from "@/lib/http";
+import { canSeeCard, isTechnical, orgMembers, personOf } from "@/lib/org";
 import { store } from "@/lib/store";
-import type { StoredCard, StoredQuestion } from "@/lib/types";
+import type { StoredCard } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const OPTIONS = preflight;
 
 const body = z.object({
   cardId: z.string(),
-  nodeId: z.string(),
   nodeKey: z.string(),
-  level: z.enum(["engineer", "senior", "intern", "manager", "client", "mom"]),
   question: z.string().trim().min(1).max(500),
-  send: z.boolean().optional(),
-  technicalQuestion: z.string().trim().max(1000).optional(),
 });
 
+/** Questions about plans and people can't be answered from code. */
+const NEEDS_ENGINEER = /\b(delay|launch|deadline|timeline|when|date|ship|release|eta|schedule|cost|budget|ready|working on)\b/i;
+
 /**
- * POST /api/ask
- * Without `send`: answer from the diff, or return a technical rewrite for the
- * reader to approve (FR-4.2, 4.3). With `send: true`: post it to GitHub.
+ * POST /api/ask { cardId, nodeKey, question }
+ * Answers from the diff at the asker's own level. When the code can't
+ * answer, returns a technical rewrite and who to ask; the app then opens a
+ * question (ticket) to that engineer.
  */
 export const POST = route(async (req) => {
+  const me = await requireUser(req);
   const input = await readJson(req, body);
   const card = await store.get<StoredCard>("cards", input.cardId);
-  if (!card) throw new ApiError("not_found");
-  const user = await optionalUser(req);
+  const users = await orgMembers(me.orgId);
+  if (!card || !canSeeCard(me, card, users)) throw new ApiError("not_found");
 
-  if (!input.send) {
-    // The diff is re-fetched, never stored. Demo cards may have no live repo.
+  const authorUser = users.find((u) => u.id === (card.authorUserId ?? card.createdBy));
+  const askTo = authorUser && authorUser.id !== me.id ? personOf(authorUser, users) : null;
+  const step = card.explanation.levels.engineer.labels[input.nodeKey] ?? input.nodeKey;
+
+  let result: { answerable: boolean; answer: string; technical_question: string };
+  if (aiConfigured()) {
     const files = await filesFor(card).catch(() => []);
-    const result = await answerQuestion({
+    result = await answerQuestion({
       explanation: card.explanation,
-      level: input.level,
+      level: me.role,
       nodeKey: input.nodeKey,
       question: input.question,
       diff: files.length ? diffText(trimFiles(files, env.maxDiffLines).files) : "(diff unavailable; use the explanation)",
     });
-    return json(
-      result.answerable
-        ? { answerable: true, answer: result.answer }
-        : { answerable: false, technicalQuestion: result.technical_question },
-    );
+  } else {
+    // No model: the demo commits still answer from their written notes.
+    const note = demoSampleFor(card.repo, card.headSha)?.notes[input.nodeKey];
+    if (NEEDS_ENGINEER.test(input.question) || !note) {
+      result = {
+        answerable: false,
+        answer: "",
+        technical_question: `About the "${step}" step: ${input.question.trim()} Does this change affect the release plan, and is any follow-up needed before it ships?`,
+      };
+    } else {
+      result = { answerable: true, answer: isTechnical(me.role) ? note.tech : note.plain, technical_question: "" };
+    }
   }
 
-  if (!input.technicalQuestion) throw new ApiError("bad_request", "technicalQuestion is required when sending.");
-  const step = card.explanation.levels.engineer.labels[input.nodeKey] ?? input.nodeKey;
-  const who = user ? `${user.name}${user.title ? ` (${user.title})` : ""}` : "A reader";
-  const comment = await postComment(
-    card,
-    [
-      "**[Rosetta]** A reader has a question about this change.",
-      "",
-      `> ${input.technicalQuestion.replace(/\n/g, "\n> ")}`,
-      "",
-      `${who} asked this while reading the \`${step}\` step. Their words: "${input.question}"`,
-      "",
-      "Reply in this thread and Rosetta will translate your answer for them.",
-    ].join("\n"),
+  return json(
+    result.answerable
+      ? { answerable: true, answer: result.answer }
+      : { answerable: false, technicalQuestion: result.technical_question, askTo },
   );
-
-  const question: StoredQuestion = {
-    id: `q_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
-    cardId: card.id,
-    nodeId: input.nodeId,
-    nodeKey: input.nodeKey,
-    level: input.level,
-    question: input.question,
-    technicalQuestion: input.technicalQuestion,
-    askedBy: user ? { id: user.id, name: user.name } : undefined,
-    githubCommentId: comment.id,
-    commentUrl: comment.html_url,
-    commentCreatedAt: comment.created_at,
-    status: "waiting",
-    createdAt: new Date().toISOString(),
-  };
-  await store.set("questions", question.id, question);
-  return json({ questionId: question.id, commentUrl: comment.html_url });
 });

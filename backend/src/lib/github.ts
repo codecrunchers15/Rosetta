@@ -152,32 +152,37 @@ export async function filesFor(card: StoredCard): Promise<RawFile[]> {
   return files;
 }
 
-export type Comment = { id: number; body: string; html_url: string; created_at: string; user: { login: string } | null };
+type GhComment = {
+  id: number;
+  body: string;
+  html_url: string;
+  created_at: string;
+  user: { login: string } | null;
+  commit_id?: string;
+};
 
-/** Posts a PR comment or a commit comment (FR-4.3). */
-export async function postComment(card: StoredCard, body: string): Promise<Comment> {
-  if (!env.githubToken) throw new ApiError("unavailable", "GITHUB_TOKEN is needed to post comments.");
-  const path =
-    card.ref.kind === "pull"
-      ? `/repos/${card.repo}/issues/${card.ref.number}/comments`
-      : `/repos/${card.repo}/commits/${card.headSha}/comments`;
-  try {
-    return await gh<Comment>(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body }),
-    });
-  } catch {
-    throw new ApiError("unavailable");
-  }
+/** Commits by one GitHub user in one repo since a date (newest first). */
+export async function listAuthorCommits(repo: string, login: string, sinceIso: string) {
+  const commits = await gh<{ sha: string }[]>(
+    `/repos/${repo}/commits?author=${encodeURIComponent(login)}&since=${encodeURIComponent(sinceIso)}&per_page=10`,
+  );
+  return commits.map((c) => c.sha);
 }
 
-export async function commentsAfter(card: StoredCard, afterIso: string): Promise<Comment[]> {
-  const comments =
-    card.ref.kind === "pull"
-      ? await gh<Comment[]>(
-          `/repos/${card.repo}/issues/${card.ref.number}/comments?since=${encodeURIComponent(afterIso)}&per_page=100`,
-        )
-      : await gh<Comment[]>(`/repos/${card.repo}/commits/${card.headSha}/comments?per_page=100`);
-  return comments.filter((c) => c.created_at > afterIso);
+/** Commit comments and PR/issue comments in a repo since a date. */
+export async function listRepoComments(repo: string, sinceIso: string) {
+  const [commitComments, issueComments] = await Promise.all([
+    gh<GhComment[]>(`/repos/${repo}/comments?per_page=50&sort=created&direction=desc`).catch(() => []),
+    gh<GhComment[]>(`/repos/${repo}/issues/comments?since=${encodeURIComponent(sinceIso)}&per_page=50`).catch(() => []),
+  ]);
+  return [...commitComments, ...issueComments]
+    .filter((c) => c.created_at > sinceIso && c.user)
+    .map((c) => ({
+      id: c.id,
+      body: c.body,
+      url: c.html_url,
+      createdAt: c.created_at,
+      login: c.user!.login,
+      commitSha: c.commit_id,
+    }));
 }

@@ -5,6 +5,7 @@ import { MotionConfig } from "motion/react";
 import { ThemeProvider } from "next-themes";
 import type { ReactNode } from "react";
 import { Toaster } from "sonner";
+import { SessionProvider } from "@/lib/session";
 import { useMediaQuery } from "@/lib/use-media-query";
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -13,6 +14,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
       <MotionConfig reducedMotion="user">
+        <SessionProvider>
         <Tooltip.Provider delay={300}>
           {children}
           <Toaster
@@ -27,6 +29,7 @@ export function Providers({ children }: { children: ReactNode }) {
             }}
           />
         </Tooltip.Provider>
+        </SessionProvider>
       </MotionConfig>
     </ThemeProvider>
   );

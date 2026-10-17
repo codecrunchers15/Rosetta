@@ -1,5 +1,4 @@
-import { LEVELS, type LevelKey } from "./levels";
-import type { FlowGraph, LevelText } from "./types";
+import type { FlowGraph, FlowNode } from "./types";
 
 /** After-nodes whose step didn't exist before: drawn with a 2px Steel border. */
 export function changedNodeIds(before: FlowGraph | null, after: FlowGraph) {
@@ -8,43 +7,53 @@ export function changedNodeIds(before: FlowGraph | null, after: FlowGraph) {
   return new Set(after.nodes.filter((n) => !beforeKeys.has(n.key)).map((n) => n.id));
 }
 
-const escapeLabel = (text: string) =>
-  text.replace(/"/g, "#quot;").replace(/</g, "#lt;").replace(/>/g, "#gt;").replace(/`/g, "'");
+const esc = (text: string) =>
+  text.replace(/"/g, "#quot;").replace(/</g, "#lt;").replace(/>/g, "#gt;").replace(/`/g, "'").replace(/\|/g, "/");
 
-/**
- * Our JSON → Mermaid text. The model never writes Mermaid (FR-3.2); labels
- * here only size the boxes, the real per-level labels are injected later.
- */
-export function toMermaid(graph: FlowGraph, sizingLabels: Record<string, string>, changed: Set<string>) {
-  const lines = ["flowchart TD"];
-  for (const node of graph.nodes) {
-    lines.push(`  ${node.id}["${escapeLabel(sizingLabels[node.key] ?? node.key)}"]`);
+/** Shape by kind: start/end pill, decision diamond, data cylinder, step box. */
+function nodeLine(node: FlowNode, label: string) {
+  const l = `"${esc(label)}"`;
+  switch (node.kind) {
+    case "start":
+    case "end":
+      return `${node.id}([${l}])`;
+    case "decision":
+      return `${node.id}{${l}}`;
+    case "data":
+      return `${node.id}[(${l})]`;
+    default:
+      return `${node.id}[${l}]`;
   }
-  for (const [from, to] of graph.edges) lines.push(`  ${from} --> ${to}`);
+}
+
+/** Our JSON → Mermaid text. The model never writes Mermaid. */
+export function toMermaid(graph: FlowGraph, labels: Record<string, string>, changed: Set<string>, direction: "LR" | "TD") {
+  const label = (key: string) => labels[key] ?? key.replace(/_/g, " ");
+  const lines = [`flowchart ${direction}`];
+
+  const grouped = new Set<string>();
+  for (const group of graph.groups ?? []) {
+    const members = graph.nodes.filter((n) => n.group === group.id);
+    if (!members.length) continue;
+    lines.push(`  subgraph ${group.id}["${esc(label(group.key))}"]`);
+    lines.push(`    direction ${direction === "LR" ? "TB" : "LR"}`);
+    for (const n of members) {
+      lines.push(`    ${nodeLine(n, label(n.key))}`);
+      grouped.add(n.id);
+    }
+    lines.push("  end");
+  }
+  for (const n of graph.nodes) if (!grouped.has(n.id)) lines.push(`  ${nodeLine(n, label(n.key))}`);
+
+  for (const [from, to, labelKey] of graph.edges) {
+    lines.push(labelKey ? `  ${from} -->|"${esc(label(labelKey))}"| ${to}` : `  ${from} --> ${to}`);
+  }
   const changedIds = graph.nodes.filter((n) => changed.has(n.id)).map((n) => n.id);
   if (changedIds.length) lines.push(`  class ${changedIds.join(",")} changed`);
   return lines.join("\n");
 }
 
-/** For each node key, the label that renders widest across all levels. */
-export function widestLabels(graph: FlowGraph, levels: Record<LevelKey, LevelText>, font: string) {
-  const ctx = document.createElement("canvas").getContext("2d");
-  if (ctx) ctx.font = `14px ${font}`;
-  const width = (text: string) => (ctx ? ctx.measureText(text).width : text.length);
-
-  const result: Record<string, string> = {};
-  for (const { key } of graph.nodes) {
-    let best = key;
-    for (const level of LEVELS) {
-      const label = levels[level.key].labels[key] ?? key;
-      if (width(label) > width(best) || best === key) best = label;
-    }
-    result[key] = best;
-  }
-  return result;
-}
-
-/** Nodes in reading order (breadth-first from the roots), for the step list. */
+/** Nodes in reading order (breadth-first from the roots), for the text version. */
 export function orderedNodes(graph: FlowGraph) {
   const incoming = new Set(graph.edges.map(([, to]) => to));
   const queue = graph.nodes.filter((n) => !incoming.has(n.id)).map((n) => n.id);
@@ -63,4 +72,9 @@ export function orderedNodes(graph: FlowGraph) {
 }
 
 export const nextNodes = (graph: FlowGraph, id: string) =>
-  graph.edges.filter(([from]) => from === id).map(([, to]) => graph.nodes.find((n) => n.id === to)!);
+  graph.edges
+    .filter(([from]) => from === id)
+    .map(([, to, labelKey]) => ({ node: graph.nodes.find((n) => n.id === to)!, labelKey }));
+
+/** Consecutive pairs of a walkthrough path, as "from>to". */
+export const pathEdges = (path: string[]) => new Set(path.slice(1).map((to, i) => `${path[i]}>${to}`));

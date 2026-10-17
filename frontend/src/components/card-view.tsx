@@ -2,165 +2,119 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { ApiError, approve, getCard } from "@/lib/api";
+import * as api from "@/lib/api";
 import { applyEdits, hasEdits } from "@/lib/edits";
-import { CARD_DEFAULT_LEVEL, LEVELS, type LevelKey, type LevelSource, type LevelState } from "@/lib/levels";
-import type { ApiErrorCode, Card, CardEdits, EditableField } from "@/lib/types";
-import { useMediaQuery } from "@/lib/use-media-query";
+import { roleLabel, roleNoun } from "@/lib/roles";
+import { useSession } from "@/lib/session";
+import type { CardEdits, CardView as CardData, CommentView, EditableField } from "@/lib/types";
 import { cn, firstName, timeAgo } from "@/lib/utils";
 import { AskWhy } from "./ask-why";
-import { BridgeSlider } from "./bridge-slider";
 import { Button, buttonStyles } from "./button";
 import { Editable } from "./editable";
 import { FilesList } from "./files-list";
-import { Flowchart, type AskTarget } from "./flowchart";
-import { LinkIcon } from "./icons";
-import { Nav } from "./nav";
+import { HowItWorks, type AskTarget } from "./flowchart";
+import { GitHubIcon } from "./icons";
+import { PersonLine } from "./person";
 import { RiskBadge } from "./risk-badge";
 import { StoryCard } from "./story-card";
-import { ThemeToggle } from "./theme-toggle";
 
-type State = { status: "loading" } | { status: "error"; code: ApiErrorCode } | { status: "ready"; card: Card };
+type State = { status: "loading" } | { status: "error"; code: string } | { status: "ready"; card: CardData };
 
 export function CardView({ id }: { id: string }) {
   const [state, setState] = useState<State>({ status: "loading" });
 
   useEffect(() => {
     let cancelled = false;
-    getCard(id)
+    api
+      .getCard(id)
       .then((card) => !cancelled && setState({ status: "ready", card }))
-      .catch((e) => !cancelled && setState({ status: "error", code: e instanceof ApiError ? e.code : "unavailable" }));
+      .catch((e) => !cancelled && setState({ status: "error", code: e instanceof api.ApiError ? e.code : "unavailable" }));
     return () => {
       cancelled = true;
     };
   }, [id]);
 
-  if (state.status === "ready") {
-    return <LoadedCard card={state.card} onCardChange={(card) => setState({ status: "ready", card })} />;
-  }
+  if (state.status === "ready") return <LoadedCard card={state.card} onCardChange={(card) => setState({ status: "ready", card })} />;
 
   return (
-    <>
-      <Nav>
-        <ThemeToggle />
-      </Nav>
-      <main className="mx-auto max-w-(--w-app) px-(--gutter) py-24">
-        {state.status === "loading" ? (
-          <p className="t-body text-fg-3" role="status">
-            Opening the card…
+    <main className="mx-auto max-w-(--w-app) px-(--gutter) py-16">
+      {state.status === "loading" ? (
+        <p className="t-body text-fg-3" role="status">
+          Opening the change…
+        </p>
+      ) : (
+        <div className="grid max-w-(--w-read) justify-items-start gap-6">
+          <h1 className="t-title text-fg-1">{state.code === "not_found" ? "This change isn't on your list." : "This change can't be opened right now."}</h1>
+          <p className="t-body text-fg-2">
+            {state.code === "not_found"
+              ? "It may belong to another team, or it was never explained in your workspace."
+              : "Rosetta can't reach its server. Try again in a minute."}
           </p>
-        ) : (
-          <div className="grid max-w-(--w-read) justify-items-start gap-6">
-            <h1 className="t-title text-fg-1">
-              {state.code === "not_found" ? "No card found at this link." : "This card can't be opened right now."}
-            </h1>
-            <p className="t-body text-fg-2">
-              {state.code === "not_found"
-                ? "It may not have been approved yet. Ask the engineer for a fresh link, or explain the commit yourself."
-                : "Explanations are unavailable right now. Try again in a minute."}
-            </p>
-            <Link href="/" className={buttonStyles({ variant: "primary" })}>
-              Explain a commit
-            </Link>
-          </div>
-        )}
-      </main>
-    </>
+          <Link href="/app" className={buttonStyles({ variant: "primary" })}>
+            Back to your work
+          </Link>
+        </div>
+      )}
+    </main>
   );
 }
 
-function LoadedCard({ card, onCardChange }: { card: Card; onCardChange: (card: Card) => void }) {
-  const wide = useMediaQuery("(min-width: 900px)", true);
-  const [level, setLevelState] = useState<LevelState>({ index: CARD_DEFAULT_LEVEL, source: "program" });
+function LoadedCard({ card, onCardChange }: { card: CardData; onCardChange: (card: CardData) => void }) {
+  const { user } = useSession();
   const [edits, setEdits] = useState<CardEdits>({});
   const [approving, setApproving] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [comments, setComments] = useState<CommentView[]>(card.comments);
   const [ask, setAsk] = useState<{ open: boolean; target: AskTarget | null }>({ open: false, target: null });
-  const docked = useDocked();
 
-  const reviewing = card.status === "draft";
+  // The reading level is the viewer's role. It can't be switched: a manager reads the manager version.
+  const levelKey = card.viewer.level;
+  const reviewing = card.status === "draft" && card.viewer.canReview;
   const explanation = applyEdits(card.explanation, edits);
-  const setLevel = useCallback((index: number, source: LevelSource) => setLevelState({ index, source }), []);
+  const level = explanation.levels[levelKey];
   const closeAsk = useCallback(() => setAsk((a) => ({ ...a, open: false })), []);
 
-  const editField = (key: LevelKey, field: EditableField, value: string) =>
-    setEdits((e) => ({ ...e, levels: { ...e.levels, [key]: { ...e.levels?.[key], [field]: value } } }));
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getForMe(card.id)
+      .then((r) => !cancelled && setNote(r.note))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [card.id]);
 
-  const shortRef = card.ref.kind === "commit" ? card.ref.sha.slice(0, 7) : `#${card.ref.number}`;
-
-  const copyLink = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const editField = (field: EditableField, value: string) =>
+    setEdits((e) => ({ ...e, levels: { ...e.levels, [levelKey]: { ...e.levels?.[levelKey], [field]: value } } }));
 
   const onApprove = async () => {
     setApproving(true);
     try {
-      const { card: approved, shareUrl } = await approve(card.id, edits);
-      const copied = await copyLink(shareUrl);
+      const { card: approved } = await api.approve(card.id, edits);
       setEdits({});
-      onCardChange(approved);
-      toast(copied ? "Approved. Link copied." : "Approved.", copied ? undefined : { description: shareUrl });
-    } catch {
-      toast("Explanations are unavailable right now. Try again in a minute.");
+      onCardChange({ ...approved, comments });
+      toast("Marked as reviewed. Your manager sees it as checked by you.");
+    } catch (e) {
+      toast(e instanceof api.ApiError && e.detail ? e.detail : "That didn't save. Try again in a minute.");
     } finally {
       setApproving(false);
     }
   };
 
-  const onShare = async () => {
-    const url = `${window.location.origin}/c/${card.id}`;
-    toast((await copyLink(url)) ? "Link copied." : url);
-  };
-
-  const flowchart = (
-    <Flowchart
-      explanation={explanation}
-      active={level.index}
-      embedded={!wide}
-      onAsk={(target) => setAsk({ open: true, target })}
-    />
-  );
-
-  const activeLevel = LEVELS[level.index];
+  const authorName = card.authorPerson?.name ?? card.author.name;
+  const shortRef = card.ref.kind === "commit" ? card.ref.sha.slice(0, 7) : `#${card.ref.number}`;
 
   return (
-    <div data-swap-source={level.source === "keyboard" ? "keyboard" : undefined}>
-      <Nav
-        meta={
-          <>
-            {card.repo} · <span className="font-mono">{shortRef}</span>
-          </>
-        }
-      >
-        {!reviewing && (
-          <Button onClick={onShare}>
-            <LinkIcon />
-            Share
-          </Button>
-        )}
-        <ThemeToggle />
-      </Nav>
+    <div>
+      <main className={cn("mx-auto max-w-(--w-app) px-(--gutter) pt-10", reviewing ? "pb-40" : "pb-24")}>
+        <Link href="/app" className="t-small text-fg-3 hover:text-fg-1">
+          Back to your work
+        </Link>
 
-      {/* Sticky dock: the slider follows you down the page. */}
-      <div
-        data-visible={docked.isDocked}
-        inert={!docked.isDocked}
-        className="materialize glass glass-flat fixed inset-x-0 top-(--nav-h) z-30 h-14"
-      >
-        <div className="mx-auto flex h-full max-w-(--w-app) items-center gap-6 px-(--gutter)">
-          <span className="w-24 shrink-0 t-small font-semibold text-fg-1">{activeLevel.label}</span>
-          <BridgeSlider variant="dock" value={level.index} source={level.source} onChange={setLevel} />
-        </div>
-      </div>
-
-      <main className={cn("mx-auto max-w-(--w-app) px-(--gutter) pt-12", reviewing ? "pb-40" : "pb-24")}>
-        <header className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
+        <header className="mt-4 flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
           <div className="min-w-0 flex-1 basis-[28rem]">
             <Editable
               as="h1"
@@ -168,21 +122,20 @@ function LoadedCard({ card, onCardChange }: { card: Card; onCardChange: (card: C
               editable={reviewing}
               label="Title"
               onCommit={(title) => setEdits((e) => ({ ...e, title }))}
-              className="t-title text-pretty text-fg-1 break-words"
+              className="t-title text-pretty break-words text-fg-1"
             />
             <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 t-small text-fg-3">
-              <span>{card.author.name}</span>
+              <PersonLine person={card.authorPerson} fallback={authorName} className="text-fg-3" />
               <span aria-hidden>·</span>
-              <span>
-                {card.ref.kind === "pull" ? "merged" : "committed"}{" "}
-                <time dateTime={card.committedAt}>{timeAgo(card.committedAt)}</time>
-              </span>
+              <time dateTime={card.committedAt}>{timeAgo(card.committedAt)}</time>
               <span aria-hidden>·</span>
-              {reviewing ? (
-                <span>Draft</span>
-              ) : (
+              {card.status === "approved" ? (
                 <span className="inline-flex h-6 items-center rounded-xs bg-surface-2 px-2 t-micro text-fg-2">
-                  Approved by {firstName(card.approvedBy ?? card.author.name)}
+                  Reviewed by {firstName(card.approvedBy ?? authorName)}
+                </span>
+              ) : (
+                <span className="inline-flex h-6 items-center rounded-xs bg-[color-mix(in_srgb,var(--risk-medium)_12%,transparent)] px-2 t-micro text-(--risk-medium)">
+                  {card.viewer.canReview ? "Waiting for your review" : `Not reviewed by ${firstName(authorName)} yet`}
                 </span>
               )}
             </p>
@@ -190,35 +143,44 @@ function LoadedCard({ card, onCardChange }: { card: Card; onCardChange: (card: C
           <RiskBadge risk={explanation.risk} reason={explanation.riskReason} />
         </header>
 
-        <div ref={docked.ref} className="mt-8 rounded-md bg-surface-1 px-6 pt-5 pb-7 shadow-elev-1 sm:px-8">
-          <BridgeSlider variant="full" value={level.index} source={level.source} onChange={setLevel} />
-        </div>
-
-        {card.truncated && (
-          <p className="mt-6 t-small text-fg-2">
-            This change is large, so Rosetta summarized the {card.truncated.shownFiles} most changed files.
-          </p>
-        )}
-
-        <p className="sr-only" aria-live="polite">
-          {activeLevel.label}: {explanation.levels[activeLevel.key].summary}
+        <p className="mt-6 t-small text-fg-2">
+          Explained for you as {roleNoun(levelKey)}.
+          {reviewing && " This is how you'll read it; your manager gets their own version. Select any text to fix it."}
         </p>
 
-        <div className="mt-6 grid gap-6 card:grid-cols-12">
+        <div className="mt-4 grid items-stretch gap-6 card:grid-cols-12">
           <div className="card:col-span-7">
             <StoryCard
-              explanation={explanation}
-              active={level.index}
+              level={level}
+              levelLabel={roleLabel(levelKey)}
               fileCount={card.files.length}
               editable={reviewing}
               onEdit={editField}
-              afterAnalogy={wide ? undefined : flowchart}
+              note={note && user ? { name: firstName(user.name), text: note } : undefined}
             />
           </div>
-          {wide && <div className="card:col-span-5">{flowchart}</div>}
+          <div className="card:col-span-5">
+            <Comments card={card} comments={comments} onAdd={(c) => setComments((all) => [...all, c])} />
+          </div>
         </div>
 
-        <FilesList files={card.files} className="mt-16" />
+        <div className="mt-6">
+          <HowItWorks explanation={explanation} level={level} onAsk={card.viewer.canAsk ? (target) => setAsk({ open: true, target }) : undefined} />
+        </div>
+
+        {card.truncated && (
+          <p className="mt-6 t-small text-fg-2">This change is large, so Rosetta summarized the {card.truncated.shownFiles} most changed files.</p>
+        )}
+
+        <div className="mt-16 flex flex-wrap items-end justify-between gap-4">
+          <FilesList files={card.files} className="min-w-0 flex-1" />
+        </div>
+        <a href={card.url} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 t-small text-fg-2 hover:text-fg-1">
+          <GitHubIcon size={14} />
+          <span className="font-mono">
+            {card.repo} · {shortRef}
+          </span>
+        </a>
       </main>
 
       <AnimatePresence>
@@ -233,40 +195,110 @@ function LoadedCard({ card, onCardChange }: { card: Card; onCardChange: (card: C
           >
             <div className="glass mx-auto flex max-w-(--w-app) items-center justify-between gap-4 rounded-lg py-3 pr-3 pl-6">
               <p className="t-small text-fg-1">
-                <span className="font-semibold">Edit</span>
+                <span className="font-semibold">Your change</span>
                 <span className="text-fg-2">
                   {" "}
-                  · {hasEdits(edits) ? "Your changes are kept until you approve." : "Select any text to change it."}
+                  · {hasEdits(edits) ? "Your fixes are kept until you mark it reviewed." : "Check it reads right, then mark it reviewed."}
                 </span>
               </p>
               <Button variant="primary" loading={approving} onClick={onApprove}>
-                Approve and share
+                Mark as reviewed
               </Button>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <AskWhy card={{ ...card, explanation }} target={ask.target} level={level.index} open={ask.open} onClose={closeAsk} />
+      <AskWhy card={{ ...card, explanation }} target={ask.target} open={ask.open} onClose={closeAsk} />
     </div>
   );
 }
 
-/** True once the slider has scrolled up under the nav. */
-function useDocked() {
-  const [isDocked, setDocked] = useState(false);
-  const observer = useRef<IntersectionObserver | null>(null);
+/** Engineers' notes on the change, each at the reader's level. */
+function Comments({ card, comments, onAdd }: { card: CardData; comments: CommentView[]; onAdd: (c: CommentView) => void }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [original, setOriginal] = useState<Set<string>>(new Set());
+  const technical = card.viewer.canComment;
 
-  const ref = useCallback((el: HTMLDivElement | null) => {
-    observer.current?.disconnect();
-    if (!el) return;
-    const navHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--nav-h")) || 64;
-    observer.current = new IntersectionObserver(
-      ([entry]) => setDocked(!entry.isIntersecting && entry.boundingClientRect.top < navHeight),
-      { rootMargin: `-${navHeight}px 0px 0px 0px` },
-    );
-    observer.current.observe(el);
-  }, []);
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setSending(true);
+    try {
+      onAdd((await api.addComment(card.id, text.trim())).comment);
+      setText("");
+    } catch {
+      toast("That comment didn't save. Try again in a minute.");
+    } finally {
+      setSending(false);
+    }
+  };
 
-  return { ref, isDocked };
+  return (
+    <section aria-labelledby="comments-heading" className="flex h-full flex-col rounded-md bg-surface-1 p-6 shadow-elev-1 sm:p-8">
+      <h2 id="comments-heading" className="t-heading text-fg-1">
+        {technical ? "Comments" : "From the engineers"}
+      </h2>
+      {!technical && <p className="mt-1 t-small text-fg-3">Their notes, rewritten for you.</p>}
+      {comments.length === 0 ? (
+        <p className="mt-4 t-small text-fg-2">{technical ? "No comments yet. Add context your manager should know." : "No notes on this change yet."}</p>
+      ) : (
+        <ul className="mt-4 grid gap-5">
+          {comments.map((c) => {
+            const showOriginal = original.has(c.id);
+            return (
+              <li key={c.id} className="grid gap-1">
+                <p className="flex flex-wrap items-center gap-x-2 t-small text-fg-3">
+                  <PersonLine person={c.author} className="text-fg-3" />
+                  <span aria-hidden>·</span>
+                  <span>{timeAgo(c.createdAt)}</span>
+                  {c.source === "github" && c.githubUrl && (
+                    <a href={c.githubUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-fg-1">
+                      <GitHubIcon size={12} /> GitHub
+                    </a>
+                  )}
+                </p>
+                <p className="t-body text-fg-1">{showOriginal ? c.original : c.text}</p>
+                {c.translated && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOriginal((s) => {
+                        const next = new Set(s);
+                        if (next.has(c.id)) next.delete(c.id);
+                        else next.add(c.id);
+                        return next;
+                      })
+                    }
+                    className="justify-self-start t-micro text-fg-3 underline underline-offset-4 hover:text-fg-1"
+                  >
+                    {showOriginal ? "Show it for me" : "Show what they wrote"}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {technical && (
+        <form onSubmit={onSubmit} className="mt-auto grid gap-2 pt-6">
+          <label htmlFor="new-comment" className="sr-only">
+            Add a comment
+          </label>
+          <textarea
+            id="new-comment"
+            rows={2}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Context for your manager: follow-ups, risks, what's next"
+            className="w-full resize-none rounded-sm bg-surface-2 px-3 py-2.5 t-body text-fg-1 shadow-ring-strong outline-none placeholder:text-fg-3 focus-visible:shadow-[0_0_0_2px_var(--focus)]"
+          />
+          <Button type="submit" loading={sending} disabled={!text.trim()} className="justify-self-end">
+            Add comment
+          </Button>
+        </form>
+      )}
+    </section>
+  );
 }

@@ -1,6 +1,6 @@
 # Rosetta backend
 
-API-only Next.js 16 app that sits between the browser and GitHub, Gemini and Firestore (PRD, "Technical architecture"). The browser never calls those services directly; every key lives here.
+API-only Next.js 16 app between the browser and GitHub, Gemini and Firestore. Every key lives here.
 
 ## Run
 
@@ -10,49 +10,59 @@ cp .env.example .env.local   # set SESSION_SECRET at least for `npm start`
 npm run dev                  # http://localhost:4000
 ```
 
-Point the frontend at it with `NEXT_PUBLIC_API_BASE=http://localhost:4000` in `frontend/.env.local`.
-
-With no keys at all it still runs. The three demo commits are served from pre-generated explanations, even with no network, and data is saved to `.data/store.json`. Add keys as you need them:
+With no keys it still runs: the three demo commits are served from hand-written explanations, Ask Why answers them from written notes, and data goes to `.data/store.json`. Add keys as you need them:
 
 | Key | Unlocks |
 | --- | --- |
-| `GITHUB_TOKEN` | Real commits beyond the anonymous limit of 60 requests an hour, and posting Ask Why comments |
-| `GEMINI_API_KEY` | Explaining any commit, Ask Why answers, reply translation, personal notes |
-| `FALLBACK_API_KEY` | Groq or OpenRouter, used when Gemini fails or is rate-limited |
-| `FIREBASE_*` | Firestore instead of the local JSON file (needed on Vercel, whose disk is read-only) |
+| `GITHUB_TOKEN` | Real commits beyond 60 requests an hour, repository sync |
+| `GEMINI_API_KEY` | Explaining any commit, Ask Why on any commit, translating comments and replies for each role, personal notes |
+| `FALLBACK_API_KEY` | Groq or OpenRouter when Gemini fails |
+| `FIREBASE_*` | Firestore instead of the local file (needed on Vercel) |
 | `SESSION_SECRET` | Signs login tokens; required in production |
+| `ALLOWED_ORIGINS` | The frontend's origin(s) for CORS |
 
-`GET /api/health` shows what's configured.
+## How it's organised
+
+- **Workspaces and a reporting tree.** A CMO or a manager creates the workspace (`/api/auth/signup`). Leads add people under them (`/api/team/members`), who join with an invite code (`/api/auth/join`). CMO → managers → engineers, senior devs, interns; clients sit under the manager who added them.
+- **Role = reading level.** Every response is written at the viewer's role. A manager can't switch to the intern version; logging in as a manager means reading as one.
+- **Who sees what.** Engineers and interns see their own changes. A manager sees everyone below them. A CMO sees the whole workspace. Clients see reviewed changes of their manager's team. Cards outside that answer `404`.
+- **Changes arrive by themselves.** Leads list repositories to watch (`PATCH /api/org`). New commits by members (matched by GitHub username) are explained through a GitHub webhook (`/api/webhooks/github?org=…`, signed with the workspace secret) or a sync (`POST /api/sync`, also run in the background when a feed is older than 5 minutes). GitHub comments by engineers in those repos are pulled in too.
+- **Detailed flowcharts.** Each explanation has a before and after graph with step, decision, data, start and end nodes, groups and labelled edges, plus a worked example (`walkthrough`) whose steps trace a path through the after graph. Labels and walkthrough text exist at all six levels.
+- **Comments and questions.** Engineers comment on changes; leads read them at their own level, filtered by engineer or team. Anyone can open a question (ticket) to people they manage or report to, with or without a change attached. Ask Why answers from the diff, or returns a technical rewrite and who to ask, so the app opens a question to that engineer. Every comment and message is translated for all six levels once, when it's written.
 
 ## Routes
 
-Send `Authorization: Bearer <token>` (from login) on every request when the user is logged in. Errors are always `{ code, message }` with a matching HTTP status. Codes: `invalid_url`, `bad_request`, `unauthorized`, `forbidden`, `private`, `not_found`, `unavailable`.
+Send `Authorization: Bearer <token>` once logged in. Errors are `{ code, message }`.
 
-| Route | Auth | Request | Response |
-| --- | --- | --- | --- |
-| `POST /api/auth/login` | no | `{ name, email, role, title?, organization?, githubLogin?, focus?, language? }` | `{ token, user, created }` |
-| `GET /api/me` | yes | | `{ user }` |
-| `PATCH /api/me` | yes | any profile field except `email` | `{ user }` |
-| `POST /api/explain` | optional | `{ url }` | NDJSON stream: `start`, `finding`…, `writing`, then `card` (or `error`) |
-| `GET /api/cards/:id` | optional | | `Card & { viewer: { canApprove, level } }` |
-| `GET /api/cards/:id/for-me` | yes | | `{ level, note }`, where `note` is null without an AI key |
-| `POST /api/approve` | yes, engineer | `{ cardId, edits }` | `{ card }` |
-| `POST /api/ask` | optional | `{ cardId, nodeId, nodeKey, level, question }` | `{ answerable: true, answer }` or `{ answerable: false, technicalQuestion }` |
-| `POST /api/ask` | optional | same + `{ send: true, technicalQuestion }` | `{ questionId, commentUrl }` |
-| `GET /api/reply?questionId=` | no | | `{ status: "waiting" }` or `{ status: "answered", reply, translatedReply }` |
-| `GET /api/health` | no | | which services are configured |
+| Route | Who | Does |
+| --- | --- | --- |
+| `POST /api/auth/signup` | anyone | Create a workspace as `cmo` or `manager` |
+| `POST /api/auth/login` | anyone | Email + password |
+| `GET /api/invites/:code` · `POST /api/auth/join` | invitee | Look up and accept an invite |
+| `GET` · `PATCH /api/me` | signed in | Profile and preferences (not role) |
+| `GET /api/team` | signed in | People, who you manage and can message, invite codes, repos, webhook |
+| `POST /api/team/members` · `PATCH /api/team/members/:id` | leads | Add someone (returns an invite code) · edit title, GitHub, team name |
+| `PATCH /api/org` | leads | Name and watched repositories |
+| `POST /api/sync` | leads | Pull new commits and comments now |
+| `POST /api/webhooks/github?org=` | GitHub | Pushes and comments, HMAC-verified |
+| `GET /api/feed?author=&team=&status=` | signed in | Changes for this person, at their level, plus filters and stats |
+| `POST /api/explain` | signed in | Explain a pasted link (NDJSON stream) |
+| `GET /api/cards/:id` | can see it | The change at the viewer's level, with comments |
+| `GET /api/cards/:id/for-me` | can see it | A two-sentence personal note |
+| `POST /api/cards/:id/comments` | engineers | Add a comment |
+| `GET /api/comments?author=&team=` | signed in | Comments from people you can see |
+| `POST /api/approve` | the author | Edit and mark reviewed |
+| `POST /api/ask` | can see it | Answer from the code, or who to ask |
+| `GET` · `POST /api/tickets` | signed in | Your questions · ask someone |
+| `GET` · `POST` · `PATCH /api/tickets/:id` | participants | Read (marks read) · reply · close or reopen |
+| `POST /api/demo/seed` | leads | Add a sample team with changes, comments and a question |
 
-`role` is one of `engineer`, `senior`, `intern`, `manager`, `client`, `mom` (shown to people as "Family or friend"), and doubles as the reader's default slider level. `focus` is any of `timelines`, `cost`, `risk`, `how-it-works`, `user-impact`.
+## Sample team
 
-## How it behaves
+On an empty workspace, "Add a sample team" creates Arjun (engineer), Priya (senior dev) and Rahul (intern) under the manager (a CMO also gets a manager, Neha). Each can log in with the email shown and the password `rosetta-demo`, so every role's view can be tried.
 
-- **One card per commit or PR.** The card id comes from the repo and short SHA (or PR number). Explaining the same link again replays the stored findings and never calls GitHub or the model.
-- **Explanations are cached by `repo@sha`.** All six levels come from one Gemini call with a strict response schema. The output is validated and repaired: duplicate edges and edges to unknown nodes are dropped, and a missing label borrows from the nearest level, so "My mom" never gets engineer words.
-- **Diffs are never stored.** They're trimmed to the 400 most-changed lines for the model. Ask Why re-fetches the diff and keeps it in memory for 10 minutes.
-- **Approval:** allowed for the user who explained the commit, or a user whose `githubLogin` matches the commit author.
-- **Ask Why replies:** `/api/reply` checks GitHub at most every 10 seconds per question. The first comment after the `[Rosetta]` one that doesn't contain `[Rosetta]` counts as the reply, and it's translated to the reader's level.
+## Known limits
 
-## Known limits (hackathon scope)
-
-- Login has no password or email check: anyone can sign in as any email. Swap in Firebase Auth or Google sign-in before real use.
-- Ask Why comments are posted with the server's `GITHUB_TOKEN`, so they appear under that account.
+- No email verification, password reset or login rate limiting yet.
+- The webhook needs the server reachable from GitHub (deployed, or a tunnel).
+- Sync explains at most 6 new commits per run to bound model calls.

@@ -1,95 +1,159 @@
-import type { LevelKey } from "./levels";
-import {
-  MockError,
-  mockApprove,
-  mockAsk,
-  mockExplain,
-  mockGetCard,
-  mockReply,
-  mockSendToEngineer,
-} from "./mock/server";
 import type {
-  ApiErrorCode,
+  ApiCode,
   AskResult,
-  Card,
   CardEdits,
+  CardView,
+  CommentView,
   ExplainEvent,
-  ReplyResult,
-  SentQuestion,
+  Feed,
+  Focus,
+  Member,
+  OrgSummary,
+  Person,
+  Role,
+  TeamView,
+  TicketDetail,
+  TicketSummary,
+  User,
 } from "./types";
 
-/**
- * Client for the four Next.js API routes in the PRD (/api/explain,
- * /api/approve, /api/ask, /api/reply) plus GET /api/cards/:id for the share
- * page. With NEXT_PUBLIC_API_BASE unset, everything runs on sample data.
- */
-
-const BASE = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "");
-export const USING_SAMPLE_DATA = !BASE;
+/** The backend (see backend/README.md). The app needs it running. */
+const BASE = (process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000").replace(/\/$/, "");
 
 export class ApiError extends Error {
-  constructor(public code: ApiErrorCode) {
+  constructor(
+    public code: ApiCode,
+    public detail?: string,
+  ) {
     super(code);
   }
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+/* ---------- session token, set by the SessionProvider ---------- */
+
+let token: string | null = null;
+export const setToken = (next: string | null) => {
+  token = next;
+};
+const authHeaders = (): Record<string, string> => (token ? { Authorization: `Bearer ${token}` } : {});
+
+async function toError(res: Response): Promise<ApiError> {
+  const body = (await res.json().catch(() => null)) as { code?: ApiCode; message?: string } | null;
+  if (body?.code) return new ApiError(body.code, body.message);
+  if (res.status === 401) return new ApiError("unauthorized");
+  if (res.status === 404) return new ApiError("not_found");
+  return new ApiError("unavailable");
+}
+
+async function call<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
+      method: init?.method ?? "GET",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: init?.body === undefined ? undefined : JSON.stringify(init.body),
     });
   } catch {
     throw new ApiError("network");
   }
-  if (!res.ok) throw new ApiError(await errorCode(res));
+  if (!res.ok) throw await toError(res);
   return res.json() as Promise<T>;
 }
 
-async function errorCode(res: Response): Promise<ApiErrorCode> {
-  const body = (await res.json().catch(() => null)) as { code?: ApiErrorCode } | null;
-  if (body?.code) return body.code;
-  if (res.status === 400) return "invalid_url";
-  if (res.status === 403) return "private";
-  if (res.status === 404) return "not_found";
-  return "unavailable";
-}
+const q = (params: Record<string, string | undefined | null>) => {
+  const s = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => Boolean(e[1]))).toString();
+  return s ? `?${s}` : "";
+};
 
-async function guard<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    if (error instanceof MockError) throw new ApiError(error.code);
-    throw error;
-  }
-}
+/* ---------- accounts ---------- */
 
-/**
- * POST /api/explain { url }
- * Responds with the card as JSON, or as NDJSON lines of ExplainEvent followed
- * by { "type": "card", "card": … } so the loading screen can narrate.
- */
-export async function explain(url: string, onEvent: (event: ExplainEvent) => void): Promise<Card> {
-  if (!BASE) return guard(() => mockExplain(url, onEvent));
+type Session = { token: string; user: User };
 
+export type WorkspaceSignup = {
+  name: string;
+  email: string;
+  password: string;
+  role: "cmo" | "manager";
+  orgName: string;
+  teamName?: string;
+  title?: string;
+  githubLogin?: string;
+  focus: Focus[];
+  language: "en" | "hinglish";
+};
+
+export const signup = (input: WorkspaceSignup) => call<Session>("/api/auth/signup", { method: "POST", body: input });
+export const login = (email: string, password: string) =>
+  call<Session>("/api/auth/login", { method: "POST", body: { email, password } });
+export const getInvite = (code: string) =>
+  call<{ name: string; email: string; role: Role; title?: string; githubLogin?: string; orgName: string; invitedBy: string | null }>(
+    `/api/invites/${encodeURIComponent(code)}`,
+  );
+export const join = (input: { code: string; password: string; name?: string; githubLogin?: string; focus?: Focus[]; language?: "en" | "hinglish" }) =>
+  call<Session>("/api/auth/join", { method: "POST", body: input });
+export const getMe = () => call<{ user: User; org: OrgSummary | null }>("/api/me");
+export const updateMe = async (patch: Partial<Pick<User, "name" | "title" | "githubLogin" | "teamName" | "focus" | "language">>) =>
+  (await call<{ user: User }>("/api/me", { method: "PATCH", body: patch })).user;
+
+/* ---------- team ---------- */
+
+export const getTeam = () => call<TeamView>("/api/team");
+export const addMember = (input: { name: string; email: string; role: Role; title?: string; githubLogin?: string; teamName?: string; managerId?: string }) =>
+  call<{ member: Person; inviteCode: string }>("/api/team/members", { method: "POST", body: input });
+export const updateMember = (id: string, patch: { title?: string; githubLogin?: string; teamName?: string }) =>
+  call<{ member: Member }>(`/api/team/members/${id}`, { method: "PATCH", body: patch });
+export const updateOrg = (patch: { name?: string; repos?: string[] }) => call<{ org: OrgSummary & { repos: string[] } }>("/api/org", { method: "PATCH", body: patch });
+export const syncNow = () => call<{ commits: number; comments: number }>("/api/sync", { method: "POST" });
+export const seedDemo = () =>
+  call<{ added: number; password: string; logins: { name: string; role: Role; email: string }[] }>("/api/demo/seed", { method: "POST" });
+
+/* ---------- work ---------- */
+
+export const getFeed = (filters: { author?: string; team?: string; status?: string } = {}) => call<Feed>(`/api/feed${q(filters)}`);
+export const getCard = (id: string) => call<CardView>(`/api/cards/${encodeURIComponent(id)}`);
+export const getForMe = (id: string) => call<{ note: string | null }>(`/api/cards/${encodeURIComponent(id)}/for-me`);
+export const approve = (cardId: string, edits: CardEdits) =>
+  call<{ card: CardView }>("/api/approve", { method: "POST", body: { cardId, edits } });
+export const addComment = (cardId: string, text: string) =>
+  call<{ comment: CommentView }>(`/api/cards/${encodeURIComponent(cardId)}/comments`, { method: "POST", body: { text } });
+export const getComments = (filters: { author?: string; team?: string } = {}) =>
+  call<{ items: CommentView[] }>(`/api/comments${q(filters)}`);
+export const ask = (input: { cardId: string; nodeKey: string; question: string }) =>
+  call<AskResult>("/api/ask", { method: "POST", body: input });
+
+/* ---------- questions ---------- */
+
+export const getTickets = () => call<{ received: TicketSummary[]; sent: TicketSummary[]; unread: number }>("/api/tickets");
+export const createTicket = (input: {
+  toId: string;
+  subject: string;
+  text: string;
+  context?: { cardId: string; nodeKey: string; technicalQuestion?: string };
+}) => call<{ ticket: TicketSummary }>("/api/tickets", { method: "POST", body: input });
+export const getTicket = (id: string) => call<{ ticket: TicketDetail }>(`/api/tickets/${id}`);
+export const replyTicket = (id: string, text: string) =>
+  call<{ ticket: TicketDetail }>(`/api/tickets/${id}`, { method: "POST", body: { text } });
+export const setTicketStatus = (id: string, status: "open" | "closed") =>
+  call<{ ticket: TicketDetail }>(`/api/tickets/${id}`, { method: "PATCH", body: { status } });
+
+/* ---------- explain a link ---------- */
+
+/** POST /api/explain: NDJSON lines of ExplainEvent, then { type: "card" }. */
+export async function explain(url: string, onEvent: (event: ExplainEvent) => void): Promise<CardView> {
   let res: Response;
   try {
     res = await fetch(`${BASE}/api/explain`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ url }),
     });
   } catch {
     throw new ApiError("network");
   }
-  if (!res.ok) throw new ApiError(await errorCode(res));
+  if (!res.ok) throw await toError(res);
+  if (!res.headers.get("content-type")?.includes("ndjson") || !res.body) return res.json() as Promise<CardView>;
 
-  if (!res.headers.get("content-type")?.includes("ndjson") || !res.body) {
-    return res.json() as Promise<Card>;
-  }
-
-  type Line = ExplainEvent | { type: "card"; card: Card } | { type: "error"; code: ApiErrorCode };
+  type Line = ExplainEvent | { type: "card"; card: CardView } | { type: "error"; code: ApiCode };
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
   for (;;) {
@@ -106,39 +170,4 @@ export async function explain(url: string, onEvent: (event: ExplainEvent) => voi
     }
     if (done) throw new ApiError("unavailable");
   }
-}
-
-/** GET /api/cards/:id */
-export function getCard(id: string): Promise<Card> {
-  if (!BASE) return guard(() => mockGetCard(id));
-  return call<Card>(`/api/cards/${encodeURIComponent(id)}`);
-}
-
-/** POST /api/approve { cardId, edits } */
-export async function approve(cardId: string, edits: CardEdits): Promise<{ card: Card; shareUrl: string }> {
-  const card = BASE
-    ? (await call<{ card: Card }>("/api/approve", { method: "POST", body: JSON.stringify({ cardId, edits }) }))
-        .card
-    : await guard(() => mockApprove(cardId, edits));
-  return { card, shareUrl: `${window.location.origin}/c/${card.id}` };
-}
-
-type AskInput = { cardId: string; nodeId: string; nodeKey: string; level: LevelKey; question: string };
-
-/** POST /api/ask: answer from the diff, or return a technical rewrite for approval (FR-4.2, 4.3). */
-export function ask(input: AskInput): Promise<AskResult> {
-  if (!BASE) return guard(() => mockAsk(input));
-  return call<AskResult>("/api/ask", { method: "POST", body: JSON.stringify(input) });
-}
-
-/** POST /api/ask { send: true }: posts the approved question as a [Rosetta] comment. */
-export function sendToEngineer(input: AskInput & { technicalQuestion: string }): Promise<SentQuestion> {
-  if (!BASE) return guard(() => mockSendToEngineer(input));
-  return call<SentQuestion>("/api/ask", { method: "POST", body: JSON.stringify({ ...input, send: true }) });
-}
-
-/** GET /api/reply?questionId= (polled every 15 s, FR-4.4). */
-export function getReply(questionId: string): Promise<ReplyResult> {
-  if (!BASE) return guard(() => mockReply(questionId));
-  return call<ReplyResult>(`/api/reply?questionId=${encodeURIComponent(questionId)}`);
 }

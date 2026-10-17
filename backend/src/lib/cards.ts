@@ -1,37 +1,64 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { SAMPLES } from "./demo/samples";
-import { LEVELS } from "./levels";
 import type { ParsedLink } from "./github-url";
-import type { Card, StoredCard, User, Viewer } from "./types";
+import { LEVELS } from "./levels";
+import { canReview, isTechnical, personOf } from "./org";
+import type { Card, StoredCard, User } from "./types";
 
-/** One card per commit or PR, so a commit is only ever explained once. */
-export function cardIdFor(link: ParsedLink) {
-  // Short SHA, so full and 7-character links to one commit share a card.
+/** One card per commit per workspace, so a commit is only explained once. */
+export function cardIdFor(orgId: string, link: ParsedLink) {
   const ref = link.kind === "commit" ? link.sha.slice(0, 7) : `pull-${link.number}`;
-  const key = `${link.owner}/${link.repo}@${ref}`.toLowerCase();
+  const key = `${orgId}:${link.owner}/${link.repo}@${ref}`.toLowerCase();
   return `c_${createHash("sha256").update(key).digest("hex").slice(0, 14)}`;
 }
 
-/** Pre-generated explanations for the demo commits (PRD reliability). */
+/** Pre-written explanations for the demo commits. */
 export function demoSampleFor(repo: string, sha: string) {
   return SAMPLES.find((s) => s.card.repo.toLowerCase() === repo.toLowerCase() && s.sha.startsWith(sha.toLowerCase()));
 }
 
-export function canApprove(card: StoredCard, user: User | null) {
-  if (!user) return false;
-  if (card.createdBy === user.id) return true;
-  return Boolean(user.githubLogin && card.author.login && user.githubLogin.toLowerCase() === card.author.login.toLowerCase());
+/**
+ * The card as one viewer gets it. The reading level is their role: a manager
+ * always reads the manager version, so logging in actually means something.
+ */
+export function publicCard(card: StoredCard, viewer: User, users: User[]) {
+  const { headSha: _h, reading: _r, findings: _f, createdBy: _c, approvedAt: _p, ...rest } = card;
+  const authorUser = users.find((u) => u.id === (card.authorUserId ?? card.createdBy));
+  const reviewer = canReview(viewer, card);
+  return {
+    ...(rest as Card & Pick<StoredCard, "orgId" | "source" | "createdAt" | "authorUserId">),
+    authorPerson: authorUser ? personOf(authorUser, users) : null,
+    viewer: {
+      level: viewer.role,
+      canReview: reviewer,
+      // The author doesn't need to ask themselves; everyone else can.
+      canAsk: !reviewer,
+      canComment: isTechnical(viewer.role) || reviewer,
+    },
+  };
 }
 
-export function viewerFor(card: StoredCard, user: User | null): Viewer {
-  return { canApprove: canApprove(card, user), level: user?.role ?? null };
-}
-
-/** The card as the frontend's Card type, plus the viewer. */
-export function publicCard(card: StoredCard, user: User | null): Card & { viewer: Viewer } {
-  const { headSha: _h, reading: _r, findings: _f, createdBy: _c, createdAt: _a, approvedAt: _p, ...rest } = card;
-  return { ...rest, viewer: viewerFor(card, user) };
+/** One line per card for feeds, at the viewer's level. */
+export function feedItem(card: StoredCard, viewer: User, users: User[], extra: { comments: number; openQuestions: number }) {
+  const authorUser = users.find((u) => u.id === (card.authorUserId ?? card.createdBy));
+  const level = card.explanation.levels[viewer.role];
+  return {
+    id: card.id,
+    title: card.explanation.title,
+    summary: level.summary,
+    impact: level.impact,
+    risk: card.explanation.risk,
+    status: card.status,
+    repo: card.repo,
+    ref: card.ref.kind === "commit" ? card.ref.sha.slice(0, 7) : `#${card.ref.number}`,
+    committedAt: card.committedAt,
+    source: card.source,
+    author: authorUser ? personOf(authorUser, users) : null,
+    authorName: authorUser?.name ?? card.author.name,
+    files: card.files.length,
+    ...extra,
+  };
 }
 
 const text = z.string().trim().min(1).max(600);

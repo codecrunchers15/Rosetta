@@ -8,12 +8,12 @@ import { BridgeSlider } from "./bridge-slider";
 import { LevelSwap } from "./level-swap";
 
 const PLAYED_KEY = "rosetta:demo-played";
-/** ~1.8s from Engineer to My mom, pausing briefly at each stop. */
+/** ~1.8s from Engineer to CMO, pausing briefly at each stop. */
 const STEP_MS = 380;
 
 /**
  * Home mini demo, on the round-robin commit's cached explanation. On the
- * first visit per session it glides once from Engineer to My mom: the only
+ * first visit per session it glides once from Engineer to CMO: the only
  * motion in the product nobody triggered (design.md §8).
  */
 export function MiniDemo() {

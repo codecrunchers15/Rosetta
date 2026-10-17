@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 
 export const metadata: Metadata = {
   title: { default: "Rosetta", template: "%s · Rosetta" },
-  description: "Explain any GitHub commit to anyone, from a senior engineer to your mom.",
+  description: "Explain any GitHub commit to anyone, from a senior engineer to your CMO.",
 };
 
 export const viewport: Viewport = {

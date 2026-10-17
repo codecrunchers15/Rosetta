@@ -3,16 +3,26 @@ import path from "node:path";
 import { env } from "./env";
 
 /**
- * Document storage. Firestore when FIREBASE_* is set (PRD), otherwise a
- * JSON file in .data/ so the backend runs locally with no setup.
- * Every document has a known id, so get/set is all we need.
+ * Document storage. Firestore when FIREBASE_* is set, otherwise a JSON file
+ * in .data/ so the backend runs locally with no setup.
  */
 
-export type Collection = "users" | "cards" | "questions" | "explanations" | "notes";
+export type Collection =
+  | "orgs"
+  | "users"
+  | "invites"
+  | "cards"
+  | "explanations"
+  | "notes"
+  | "comments"
+  | "tickets";
 
 interface Store {
   get<T>(collection: Collection, id: string): Promise<T | null>;
   set<T extends object>(collection: Collection, id: string, data: T): Promise<void>;
+  remove(collection: Collection, id: string): Promise<void>;
+  /** Every document where `field` equals `value` (one equality filter). */
+  list<T>(collection: Collection, field: string, value: string): Promise<T[]>;
 }
 
 class FirestoreStore implements Store {
@@ -45,6 +55,15 @@ class FirestoreStore implements Store {
   async set<T extends object>(collection: Collection, id: string, data: T) {
     await (await this.db).collection(collection).doc(id).set(data);
   }
+
+  async remove(collection: Collection, id: string) {
+    await (await this.db).collection(collection).doc(id).delete();
+  }
+
+  async list<T>(collection: Collection, field: string, value: string) {
+    const snap = await (await this.db).collection(collection).where(field, "==", value).get();
+    return snap.docs.map((d) => d.data() as T);
+  }
 }
 
 class FileStore implements Store {
@@ -55,6 +74,11 @@ class FileStore implements Store {
     this.data = existsSync(this.file) ? JSON.parse(readFileSync(this.file, "utf8")) : {};
   }
 
+  private flush() {
+    mkdirSync(path.dirname(this.file), { recursive: true });
+    writeFileSync(this.file, JSON.stringify(this.data, null, 2));
+  }
+
   async get<T>(collection: Collection, id: string) {
     const doc = this.data[collection]?.[id];
     return doc ? (structuredClone(doc) as T) : null;
@@ -62,22 +86,23 @@ class FileStore implements Store {
 
   async set<T extends object>(collection: Collection, id: string, data: T) {
     (this.data[collection] ??= {})[id] = JSON.parse(JSON.stringify(data));
-    mkdirSync(path.dirname(this.file), { recursive: true });
-    writeFileSync(this.file, JSON.stringify(this.data, null, 2));
+    this.flush();
+  }
+
+  async remove(collection: Collection, id: string) {
+    delete this.data[collection]?.[id];
+    this.flush();
+  }
+
+  async list<T>(collection: Collection, field: string, value: string) {
+    return Object.values(this.data[collection] ?? {})
+      .filter((doc) => (doc as Record<string, unknown>)[field] === value)
+      .map((doc) => structuredClone(doc) as T);
   }
 }
 
 const usingFirestore = Boolean(env.firebaseProjectId && env.firebaseClientEmail && env.firebasePrivateKey);
 
-// One instance per server process, also across dev hot reloads.
 const globalStore = globalThis as unknown as { __rosettaStore?: Store };
 export const store: Store = (globalStore.__rosettaStore ??= usingFirestore ? new FirestoreStore() : new FileStore());
 export const storeKind = usingFirestore ? "firestore" : "file";
-
-export async function update<T extends object>(collection: Collection, id: string, patch: Partial<T>) {
-  const current = await store.get<T>(collection, id);
-  if (!current) return null;
-  const next = { ...current, ...patch };
-  await store.set(collection, id, next);
-  return next;
-}

@@ -3,6 +3,7 @@ import { aiConfigured } from "@/lib/ai/provider";
 import { personalNote } from "@/lib/ai/tasks";
 import { requireUser } from "@/lib/auth";
 import { ApiError, json, preflight, route } from "@/lib/http";
+import { canSeeCard, orgMembers } from "@/lib/org";
 import { store } from "@/lib/store";
 import type { StoredCard, User } from "@/lib/types";
 
@@ -13,30 +14,25 @@ type Ctx = { params: Promise<{ id: string }> };
 type Note = { text: string; profileHash: string; explanationHash: string };
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
-const profileHash = (u: User) => hash([u.role, u.title, u.organization, u.focus, u.language, u.name]);
+const profileHash = (u: User) => hash([u.role, u.title, u.focus, u.language, u.name]);
 
-/**
- * GET /api/cards/:id/for-me → { level, note }
- * The default level comes from the reader's profile; the note is a
- * two-sentence "what this means for you", cached per card and profile.
- */
+/** GET /api/cards/:id/for-me → { note }: two sentences written for this reader, cached per profile. */
 export const GET = route<Ctx>(async (req, { params }) => {
   const { id } = await params;
-  const user = await requireUser(req);
+  const me = await requireUser(req);
   const card = await store.get<StoredCard>("cards", id);
-  if (!card) throw new ApiError("not_found");
+  if (!card || !canSeeCard(me, card, await orgMembers(me.orgId))) throw new ApiError("not_found");
 
-  const noteId = `${id}_${user.id}`;
-  const keys = { profileHash: profileHash(user), explanationHash: hash(card.explanation.levels[user.role]) };
+  const noteId = `${id}_${me.id}`;
+  const keys = { profileHash: profileHash(me), explanationHash: hash(card.explanation.levels[me.role]) };
   const cached = await store.get<Note>("notes", noteId);
   if (cached && cached.profileHash === keys.profileHash && cached.explanationHash === keys.explanationHash) {
-    return json({ level: user.role, note: cached.text });
+    return json({ note: cached.text });
   }
-
   let note: string | null = null;
   if (aiConfigured()) {
-    note = await personalNote(card.explanation, user).catch(() => null);
+    note = await personalNote(card.explanation, me).catch(() => null);
     if (note) await store.set("notes", noteId, { text: note, ...keys } satisfies Note);
   }
-  return json({ level: user.role, note });
+  return json({ note });
 });

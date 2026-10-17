@@ -1,9 +1,5 @@
-import type { Metadata } from "next";
-import { CardView } from "@/components/card-view";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Explained commit" };
-
-export default async function CardPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  return <CardView id={id} />;
+export default async function OldCardPage({ params }: { params: Promise<{ id: string }> }) {
+  redirect(`/app/c/${(await params).id}`);
 }

@@ -1,6 +1,6 @@
 # Prompt: add login, profile cards and personalised explanations to the Rosetta frontend
 
-You are working in `frontend/`, the Next.js 16 + Tailwind v4 app for **Rosetta**, a tool that explains any GitHub commit at six reader levels (Engineer, Senior dev, Intern, Manager, Client, My mom). Read these before you change anything:
+You are working in `frontend/`, the Next.js 16 + Tailwind v4 app for **Rosetta**, a tool that explains any GitHub commit at six reader levels (Engineer, Senior dev, Intern, Manager, Client, CMO). Read these before you change anything:
 
 - `design.md` (repo root, if present) and `frontend/src/app/globals.css`: the visual system. Every new screen must use its tokens, type scale (`t-display`, `t-title`, `t-heading`, `t-body`, `t-small`, `t-micro`), radius scale, glass rules and motion rules.
 - `frontend/README.md`: what exists today.
@@ -34,7 +34,7 @@ Role radio cards (label, then description in `--text-2`):
 - `intern`: **Intern or learner**. "I'm learning the codebase and want the how and why."
 - `manager`: **Manager**. "I need impact, risk and whether plans change."
 - `client`: **Client**. "I want to know what the work means for my business."
-- `mom`: **Family or friend**. "I don't work with code. Keep it simple."
+- `cmo`: **CMO**. "I lead marketing. Tell me what it means for customers and growth."
 
 Under the form, show a **live preview**: the round-robin demo summary (from `src/lib/mock/samples.ts`) at the level currently selected, swapping with the existing `LevelSwap` crossfade as the role changes. It shows people what their choice means. One primary button at the bottom: **Create profile**, or **Save profile** when editing.
 
@@ -100,7 +100,7 @@ POST  /api/approve           { cardId, edits } → { card }             (auth re
 ## 4. Done when
 
 - [ ] Signing up as a Manager, pasting the round-robin sample and opening the card puts the slider at Manager and shows the "For you" note (when the backend has an AI key).
-- [ ] Signing up as Family or friend opens the same card at My mom.
+- [ ] Signing up as a CMO opens the same card at CMO.
 - [ ] An engineer whose GitHub username matches the commit author sees the review bar; a manager opening the same draft doesn't.
 - [ ] A signed-out visitor can open a shared `/c/:id` link, read it at Manager, and make a profile from the inline link without losing their place.
 - [ ] A reload keeps the session; **Log out** clears it.

@@ -410,6 +410,38 @@ html[data-sheet-open] .glass.toast {
   transition: none;
 }
 
+/* Dialogs stay centred; they fade and settle from 0.96. */
+.dialog-popup {
+  transition:
+    opacity var(--dur-menu) var(--ease-out),
+    scale var(--dur-menu) var(--ease-out);
+}
+.dialog-popup[data-starting-style],
+.dialog-popup[data-ending-style] {
+  opacity: 0;
+  scale: 0.96;
+}
+.dialog-backdrop {
+  transition: opacity var(--dur-menu) ease;
+}
+.dialog-backdrop[data-starting-style],
+.dialog-backdrop[data-ending-style] {
+  opacity: 0;
+}
+
+/* Menus scale from their trigger (§8). */
+.menu-popup {
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity var(--dur-menu) var(--ease-out),
+    transform var(--dur-menu) var(--ease-out);
+}
+.menu-popup[data-starting-style],
+.menu-popup[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
 /* ------------------------------------------------------------------ */
 /* Ask Why side sheet: materializes from the right (§8)               */
 /* ------------------------------------------------------------------ */
@@ -466,37 +498,72 @@ html[data-sheet-open] .glass.toast {
   margin-inline: auto;
   overflow: visible;
 }
+.flow foreignObject {
+  overflow: visible;
+}
+
+/* Nodes: every shape gets the same quiet surface. */
 .flow .node rect,
 .flow .node polygon,
-.flow .node path.basic {
+.flow .node path,
+.flow .node circle,
+.flow .node ellipse {
   fill: var(--surface-2) !important;
   stroke: var(--ring-strong) !important;
   stroke-width: 1px !important;
-  rx: 10px;
-  ry: 10px;
   transition:
     stroke 150ms ease,
-    fill 150ms ease;
+    fill 150ms ease,
+    opacity 200ms ease;
+}
+.flow .node rect.basic {
+  rx: 10px;
+  ry: 10px;
 }
 .flow .nodeLabel,
 .flow .nodeLabel *,
 .flow .node .label {
-  color: var(--text-2) !important;
-  fill: var(--text-2) !important;
+  color: var(--text-1) !important;
+  fill: var(--text-1) !important;
   font-family: var(--font-sans) !important;
   font-size: 14px !important;
   line-height: 1.35 !important;
 }
-.flow[data-panel="after"] .nodeLabel,
-.flow[data-panel="after"] .nodeLabel * {
-  color: var(--text-1) !important;
+.flow[data-panel="before"] .nodeLabel,
+.flow[data-panel="before"] .nodeLabel * {
+  color: var(--text-2) !important;
 }
-.flow[data-panel="after"] .node.changed rect {
+/* Steps this change added. */
+.flow[data-panel="after"] .node.changed rect,
+.flow[data-panel="after"] .node.changed polygon,
+.flow[data-panel="after"] .node.changed path {
   stroke: var(--color-steel) !important;
   stroke-width: 2px !important;
 }
+
+/* Groups: a dashed box with a quiet title. */
+.flow .cluster rect {
+  fill: color-mix(in srgb, var(--color-steel) 6%, transparent) !important;
+  stroke: var(--ring-strong) !important;
+  stroke-dasharray: 4 4;
+  rx: 14px;
+  ry: 14px;
+}
+.flow .cluster .nodeLabel,
+.flow .cluster-label .nodeLabel,
+.flow .cluster-label * {
+  color: var(--text-3) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+/* Edges and their labels. */
 .flow .flowchart-link {
   stroke: var(--text-3) !important;
+  transition:
+    stroke 200ms ease,
+    opacity 200ms ease,
+    stroke-width 200ms ease;
 }
 .flow marker path,
 .flow .arrowheadPath,
@@ -504,24 +571,64 @@ html[data-sheet-open] .glass.toast {
   fill: var(--text-3) !important;
   stroke: var(--text-3) !important;
 }
+.flow .edgeLabel,
+.flow .edgeLabel p,
+.flow .edgeLabel span {
+  background-color: var(--surface-1) !important;
+  color: var(--text-2) !important;
+  font-size: 12.5px !important;
+  font-family: var(--font-sans) !important;
+}
+.flow .edgeLabel rect,
+.flow .labelBkg {
+  fill: var(--surface-1) !important;
+  background-color: var(--surface-1) !important;
+  opacity: 1 !important;
+}
+.flow .edgeLabel {
+  transition: opacity 200ms ease;
+}
+
+/* Walkthrough: the current path lights up, the rest steps back. */
+.flow[data-tracing] .node,
+.flow[data-tracing] .flowchart-link,
+.flow[data-tracing] .edgeLabel {
+  opacity: 0.3;
+}
+.flow[data-tracing] .node.is-on,
+.flow[data-tracing] .flowchart-link.is-on,
+.flow[data-tracing] .edgeLabel.is-on {
+  opacity: 1;
+}
+.flow[data-tracing] .node.is-on rect,
+.flow[data-tracing] .node.is-on polygon,
+.flow[data-tracing] .node.is-on path {
+  stroke: var(--color-steel) !important;
+  stroke-width: 2px !important;
+  fill: color-mix(in srgb, var(--color-steel) 22%, var(--surface-2)) !important;
+}
+.flow[data-tracing] .flowchart-link.is-on {
+  stroke: var(--color-steel) !important;
+  stroke-width: 2.5px !important;
+}
+
+/* Asking: nodes are buttons. */
 .flow .node[data-ask] {
   cursor: pointer;
   outline: none;
 }
 @media (hover: hover) and (pointer: fine) {
-  .flow .node[data-ask]:hover rect {
-    stroke: var(--text-3) !important;
-  }
-  .flow[data-panel="after"] .node.changed[data-ask]:hover rect {
+  .flow .node[data-ask]:hover rect,
+  .flow .node[data-ask]:hover polygon,
+  .flow .node[data-ask]:hover path {
     stroke: var(--color-mist) !important;
   }
 }
-.flow .node[data-ask]:focus-visible rect {
+.flow .node[data-ask]:focus-visible rect,
+.flow .node[data-ask]:focus-visible polygon,
+.flow .node[data-ask]:focus-visible path {
   stroke: var(--focus) !important;
   stroke-width: 2px !important;
-}
-.flow foreignObject {
-  overflow: visible;
 }
 
 /* ------------------------------------------------------------------ */
