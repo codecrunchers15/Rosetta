@@ -8,11 +8,11 @@ export const env = {
   /** Any OpenAI-compatible endpoint: Groq by default, or OpenRouter. */
   fallbackKey: process.env.FALLBACK_API_KEY || "",
   fallbackBaseUrl: process.env.FALLBACK_BASE_URL || "https://api.groq.com/openai/v1",
-  fallbackModel: process.env.FALLBACK_MODEL || "llama-3.3-70b-versatile",
+  fallbackModel: process.env.FALLBACK_MODEL || "openai/gpt-oss-120b",
 
   firebaseProjectId: process.env.FIREBASE_PROJECT_ID || "",
   firebaseClientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
-  firebasePrivateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\n/g, "\n"),
+  firebasePrivateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
 
   sessionSecret: process.env.SESSION_SECRET || "",
   allowedOrigins: (process.env.ALLOWED_ORIGINS || "http://localhost:3000")
