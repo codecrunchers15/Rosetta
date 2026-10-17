@@ -67,7 +67,7 @@ class FirestoreStore implements Store {
 }
 
 class FileStore implements Store {
-  private file = path.join(process.cwd(), ".data", "store.json");
+  private file = path.join(process.env.DATA_DIR || path.join(process.cwd(), ".data"), "store.json");
   private data: Record<string, Record<string, unknown>>;
 
   constructor() {

@@ -2,7 +2,8 @@ import { requireUser } from "@/lib/auth";
 import { json, preflight, route } from "@/lib/http";
 import { descendants, orgMembers, personOf, visibleAuthorIds } from "@/lib/org";
 import { store } from "@/lib/store";
-import { display } from "@/lib/translate";
+import { after } from "next/server";
+import { backfill, display } from "@/lib/translate";
 import type { Comment, StoredCard } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,13 @@ export const GET = route(async (req) => {
     store.list<StoredCard>("cards", "orgId", me.orgId),
   ]);
   const titles = new Map(cards.map((c) => [c.id, c.explanation.title]));
+  const untranslated = comments.filter((c) => allowed.has(c.authorId) && !c.levels);
+  if (untranslated.length) {
+    after(async () => {
+      const nameOf = (uid: string) => users.find((u) => u.id === uid)?.name ?? "An engineer";
+      if (await backfill(untranslated, nameOf, undefined, 6)) for (const c of untranslated) await store.set("comments", c.id, c);
+    });
+  }
 
   const items = comments
     .filter((c) => allowed.has(c.authorId))

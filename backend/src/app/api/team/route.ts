@@ -34,6 +34,7 @@ export const GET = route(async (req) => {
   return json({
     me: personOf(me, users),
     canAdd: CAN_ADD[me.role],
+    isOwner: org.ownerId === me.id,
     members,
     org: {
       id: org.id,

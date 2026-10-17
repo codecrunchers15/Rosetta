@@ -3,7 +3,8 @@ import { publicCard } from "@/lib/cards";
 import { ApiError, json, preflight, route } from "@/lib/http";
 import { canSeeCard, orgMembers, personOf } from "@/lib/org";
 import { store } from "@/lib/store";
-import { display } from "@/lib/translate";
+import { after } from "next/server";
+import { backfill, display } from "@/lib/translate";
 import type { Comment, StoredCard } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,15 @@ export const GET = route<Ctx>(async (req, { params }) => {
   // Same answer for "doesn't exist" and "not yours".
   if (!card || !canSeeCard(me, card, users)) throw new ApiError("not_found");
 
-  const comments = (await store.list<Comment>("comments", "cardId", id))
+  const stored = await store.list<Comment>("comments", "cardId", id);
+  // Translate older comments in the background; the next visit shows them.
+  if (stored.some((c) => !c.levels)) {
+    after(async () => {
+      const nameOf = (uid: string) => users.find((u) => u.id === uid)?.name ?? "An engineer";
+      if (await backfill(stored, nameOf, card.explanation.title)) for (const c of stored) await store.set("comments", c.id, c);
+    });
+  }
+  const comments = stored
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     .map((c) => {
       const author = users.find((u) => u.id === c.authorId);

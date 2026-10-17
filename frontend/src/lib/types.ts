@@ -201,6 +201,8 @@ export type Member = Person & {
 export type TeamView = {
   me: Person;
   canAdd: Role[];
+  /** The person who created the workspace: may change roles and remove people. */
+  isOwner: boolean;
   members: Member[];
   org: OrgSummary & { repos: string[]; lastSyncAt: string | null; webhookPath?: string; webhookSecret?: string };
 };

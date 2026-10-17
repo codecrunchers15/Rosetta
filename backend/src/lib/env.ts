@@ -3,7 +3,7 @@ export const env = {
   githubToken: process.env.GITHUB_TOKEN || "",
 
   geminiKey: process.env.GEMINI_API_KEY || "",
-  geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  geminiModel: process.env.GEMINI_MODEL || "gemini-3.8-flash",
 
   /** Any OpenAI-compatible endpoint: Groq by default, or OpenRouter. */
   fallbackKey: process.env.FALLBACK_API_KEY || "",

@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { after } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { ApiError, json, preflight, readJson, route } from "@/lib/http";
 import { orgMembers } from "@/lib/org";
 import { store } from "@/lib/store";
 import { ticketDetail } from "@/lib/tickets";
-import { translated } from "@/lib/translate";
+import { backfill, translateTicketMessageLater } from "@/lib/translate";
 import type { StoredCard, Ticket, User } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -28,10 +29,15 @@ export const GET = route<Ctx>(async (req, { params }) => {
   const { id } = await params;
   const me = await requireUser(req);
   const { ticket, users, card } = await load(id, me);
+  let dirty = false;
   if (ticket.unreadBy.includes(me.id)) {
     ticket.unreadBy = ticket.unreadBy.filter((u) => u !== me.id);
-    await store.set("tickets", id, ticket);
+    dirty = true;
   }
+  // Messages written before an AI key was set get their level versions now.
+  const nameOf = (uid: string) => users.find((u) => u.id === uid)?.name ?? "A teammate";
+  if (await backfill(ticket.messages, nameOf, card?.explanation.title ?? ticket.subject)) dirty = true;
+  if (dirty) await store.set("tickets", id, ticket);
   return json({ ticket: ticketDetail(ticket, me, users, card) });
 });
 
@@ -43,17 +49,14 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const { ticket, users, card } = await load(id, me);
   const now = new Date().toISOString();
   const otherId = ticket.fromId === me.id ? ticket.toId : ticket.fromId;
-  ticket.messages.push({
-    id: `tm_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
-    authorId: me.id,
-    createdAt: now,
-    ...(await translated(text, me.name, card?.explanation.title ?? ticket.subject)),
-  });
+  const messageId = `tm_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  ticket.messages.push({ id: messageId, authorId: me.id, createdAt: now, text });
   // The person asked replying means it's answered; the asker following up reopens it.
   ticket.status = me.id === ticket.toId ? "answered" : "open";
   ticket.unreadBy = [otherId];
   ticket.updatedAt = now;
   await store.set("tickets", id, ticket);
+  after(() => translateTicketMessageLater(id, messageId, me.name, card?.explanation.title ?? ticket.subject));
   return json({ ticket: ticketDetail(ticket, me, users, card) });
 });
 

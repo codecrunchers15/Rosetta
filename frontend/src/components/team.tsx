@@ -10,6 +10,7 @@ import { cn, timeAgo } from "@/lib/utils";
 import { Page } from "./app-shell";
 import { Button } from "./button";
 import { ComposeQuestion } from "./compose-question";
+import { ManageMember } from "./manage-member";
 import { Field, inputClass } from "./form";
 import { Avatar } from "./person";
 
@@ -29,6 +30,7 @@ export function Team() {
   const { user } = useSession();
   const [team, setTeam] = useState<TeamView | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
+  const [managing, setManaging] = useState<Member | null>(null);
   const load = () => api.getTeam().then(setTeam).catch(() => {});
   useEffect(() => {
     load();
@@ -61,13 +63,18 @@ export function Team() {
                     {g.lead.id === team.me.id ? "You" : g.lead.name} · {roleLabel(g.lead.role)}
                   </p>
                 </div>
+                {team.isOwner && g.lead.id !== team.me.id && (
+                  <Button variant="ghost" className="ml-auto h-8!" onClick={() => setManaging(g.lead as Member)}>
+                    Manage
+                  </Button>
+                )}
               </div>
               {g.people.length === 0 ? (
                 <p className="mt-4 t-small text-fg-2">Nobody here yet.</p>
               ) : (
                 <ul className="mt-4 grid gap-1">
                   {g.people.map((m) => (
-                    <MemberRow key={m.id} member={m} onAsk={() => setAsking(m.id)} />
+                    <MemberRow key={m.id} member={m} onAsk={() => setAsking(m.id)} onManage={team.isOwner ? () => setManaging(m) : undefined} />
                   ))}
                 </ul>
               )}
@@ -81,6 +88,8 @@ export function Team() {
         </aside>
       </div>
 
+      <ManageMember team={team} member={managing} onClose={() => setManaging(null)} onChanged={load} />
+
       <ComposeQuestion
         open={asking !== null}
         onOpenChange={(open) => !open && setAsking(null)}
@@ -93,7 +102,7 @@ export function Team() {
   );
 }
 
-function MemberRow({ member, onAsk }: { member: Member; onAsk: () => void }) {
+function MemberRow({ member, onAsk, onManage }: { member: Member; onAsk: () => void; onManage?: () => void }) {
   const joinLink = typeof window !== "undefined" && member.inviteCode ? `${window.location.origin}/join?code=${member.inviteCode}` : "";
   return (
     <li className="-mx-2 flex flex-wrap items-center gap-3 rounded-sm p-2">
@@ -101,7 +110,8 @@ function MemberRow({ member, onAsk }: { member: Member; onAsk: () => void }) {
       <div className="min-w-0 flex-1">
         <p className="truncate t-small font-semibold text-fg-1">{member.name}</p>
         <p className="truncate t-micro text-fg-3">
-          {member.title || roleLabel(member.role)}
+          <span className="font-medium text-fg-2">{roleLabel(member.role)}</span>
+          {member.title && member.title !== roleLabel(member.role) && ` · ${member.title}`}
           {member.githubLogin && <span className="font-mono"> · @{member.githubLogin}</span>}
           {member.email && ` · ${member.email}`}
         </p>
@@ -121,6 +131,11 @@ function MemberRow({ member, onAsk }: { member: Member; onAsk: () => void }) {
             Ask
           </Button>
         )
+      )}
+      {onManage && (
+        <Button className="h-8!" onClick={onManage}>
+          Manage
+        </Button>
       )}
     </li>
   );

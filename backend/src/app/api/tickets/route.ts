@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { after } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { ApiError, json, preflight, readJson, route } from "@/lib/http";
 import { canMessage, canSeeCard, orgMembers } from "@/lib/org";
 import { store } from "@/lib/store";
 import { ticketView } from "@/lib/tickets";
-import { translated } from "@/lib/translate";
+import { translateTicketMessageLater } from "@/lib/translate";
 import type { StoredCard, Ticket } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -68,18 +69,13 @@ export const POST = route(async (req) => {
     subject: input.subject,
     ...(input.context ? { context: input.context } : {}),
     status: "open",
-    messages: [
-      {
-        id: newId("tm"),
-        authorId: me.id,
-        createdAt: now,
-        ...(await translated(input.text, me.name, card?.explanation.title)),
-      },
-    ],
+    messages: [{ id: newId("tm"), authorId: me.id, createdAt: now, text: input.text }],
     unreadBy: [to.id],
     createdAt: now,
     updatedAt: now,
   };
   await store.set("tickets", ticket.id, ticket);
+  // Send at once; the version for each reader is written in the background.
+  after(() => translateTicketMessageLater(ticket.id, ticket.messages[0].id, me.name, card?.explanation.title));
   return json({ ticket: ticketView(ticket, me, users, card?.explanation.title) }, 201);
 });

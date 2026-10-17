@@ -100,8 +100,11 @@ export const updateMe = async (patch: Partial<Pick<User, "name" | "title" | "git
 export const getTeam = () => call<TeamView>("/api/team");
 export const addMember = (input: { name: string; email: string; role: Role; title?: string; githubLogin?: string; teamName?: string; managerId?: string }) =>
   call<{ member: Person; inviteCode: string }>("/api/team/members", { method: "POST", body: input });
-export const updateMember = (id: string, patch: { title?: string; githubLogin?: string; teamName?: string }) =>
-  call<{ member: Member }>(`/api/team/members/${id}`, { method: "PATCH", body: patch });
+export const updateMember = (
+  id: string,
+  patch: { title?: string; githubLogin?: string; teamName?: string; role?: Role; managerId?: string },
+) => call<{ member: Member }>(`/api/team/members/${id}`, { method: "PATCH", body: patch });
+export const removeMember = (id: string) => call<{ removed: string }>(`/api/team/members/${id}`, { method: "DELETE" });
 export const updateOrg = (patch: { name?: string; repos?: string[] }) => call<{ org: OrgSummary & { repos: string[] } }>("/api/org", { method: "PATCH", body: patch });
 export const syncNow = () => call<{ commits: number; comments: number }>("/api/sync", { method: "POST" });
 export const seedDemo = () =>

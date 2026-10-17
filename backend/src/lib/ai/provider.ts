@@ -34,12 +34,16 @@ async function gemini(task: JsonTask<unknown>): Promise<unknown> {
           temperature: task.temperature ?? 0.4,
         },
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(60_000),
     },
   );
   if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
+  const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
+  // Thinking models may return thought parts; only the answer parts are JSON.
+  const text = data.candidates?.[0]?.content?.parts
+    ?.filter((p) => !p.thought)
+    .map((p) => p.text ?? "")
+    .join("");
   if (!text) throw new Error("Gemini returned no text");
   return JSON.parse(text);
 }
@@ -60,7 +64,7 @@ async function openAiCompatible(task: JsonTask<unknown>): Promise<unknown> {
         { role: "user", content: task.prompt },
       ],
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) throw new Error(`Fallback ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
