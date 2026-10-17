@@ -1,0 +1,561 @@
+@import "tailwindcss";
+
+/* Hover only on devices that really hover (design.md §9). */
+@custom-variant hover {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Theme (design.md §12)                                               */
+/* ------------------------------------------------------------------ */
+
+@theme static {
+  --color-abyss: #0a1931;
+  --color-deep: #1a3d63;
+  --color-steel: #4a7fa7;
+  --color-mist: #b3cfe5;
+  --color-paper: #f6fafd;
+
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --breakpoint-card: 56.25rem; /* 900px: card view goes two-column */
+}
+
+@theme inline {
+  --font-display: var(--font-bricolage), "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist), "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-canvas: var(--bg);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-fg-1: var(--text-1);
+  --color-fg-2: var(--text-2);
+  --color-fg-3: var(--text-3);
+  --color-focus: var(--focus);
+
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-elev-3: var(--elev-3);
+  --shadow-ring: 0 0 0 1px var(--ring);
+  --shadow-ring-strong: 0 0 0 1px var(--ring-strong);
+}
+
+:root {
+  --w-read: 640px;
+  --w-app: 1120px;
+  --gutter: clamp(20px, 5vw, 48px);
+  --nav-h: 64px;
+
+  --dur-press: 140ms;
+  --dur-tooltip: 150ms;
+  --dur-swap: 200ms;
+  --dur-menu: 200ms;
+  --dur-panel: 320ms;
+}
+
+:root,
+[data-theme="dark"] {
+  --bg: #0a1931;
+  --surface-1: #102642;
+  --surface-2: #142f4f;
+  --surface-3: #1a3a5e; /* hovered secondary button */
+  --text-1: #f6fafd;
+  --text-2: #b3cfe5;
+  --text-3: #8098af;
+  --ring: rgba(179, 207, 229, 0.12);
+  --ring-strong: rgba(179, 207, 229, 0.22);
+  --focus: #4a7fa7;
+
+  --btn-primary-bg: #f6fafd;
+  --btn-primary-fg: #0a1931;
+  --btn-primary-hover: #ffffff;
+  --ghost-fg: var(--text-2);
+
+  --elev-1: 0 0 0 1px var(--ring), 0 1px 2px rgba(10, 25, 49, 0.2);
+  --elev-2: 0 0 0 1px var(--ring), 0 8px 24px -8px rgba(10, 25, 49, 0.45);
+  --elev-3: 0 0 0 1px var(--ring), 0 24px 64px -16px rgba(10, 25, 49, 0.6);
+
+  --glass-bg: rgba(26, 61, 99, 0.45);
+  --glass-sat: 160%;
+  --glass-shadow: inset 0 1px 0 rgba(246, 250, 253, 0.08), 0 0 0 1px rgba(179, 207, 229, 0.14),
+    0 24px 64px -16px rgba(10, 25, 49, 0.6);
+  --glass-highlight: inset 0 1px 0 rgba(246, 250, 253, 0.08);
+
+  --risk-low: #6fc2a0;
+  --risk-medium: #e6b85c;
+  --risk-high: #e8857e;
+
+  --ink-a: #1a3d63;
+  --ink-b: #4a7fa7;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #f6fafd;
+  --surface-1: #ffffff;
+  --surface-2: #e5eff7;
+  --surface-3: #d8e6f2;
+  --text-1: #0a1931;
+  --text-2: #1a3d63;
+  --text-3: #4a6785;
+  --ring: rgba(26, 61, 99, 0.1);
+  --ring-strong: rgba(26, 61, 99, 0.18);
+  --focus: #4a7fa7;
+
+  --btn-primary-bg: #0a1931;
+  --btn-primary-fg: #f6fafd;
+  --btn-primary-hover: #142f4f;
+  --ghost-fg: #1a3d63;
+
+  --elev-1: 0 0 0 1px var(--ring), 0 1px 2px rgba(10, 25, 49, 0.06);
+  --elev-2: 0 0 0 1px var(--ring), 0 8px 24px -8px rgba(10, 25, 49, 0.14);
+  --elev-3: 0 0 0 1px var(--ring), 0 24px 64px -16px rgba(10, 25, 49, 0.18);
+
+  --glass-bg: rgba(246, 250, 253, 0.7);
+  --glass-sat: 180%;
+  --glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 0 0 1px rgba(26, 61, 99, 0.1),
+    0 24px 64px -16px rgba(10, 25, 49, 0.18);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  --risk-low: #2f7d62;
+  --risk-medium: #8c6110;
+  --risk-high: #b4423b;
+
+  color-scheme: light;
+}
+
+/* ------------------------------------------------------------------ */
+/* Base + mobile baseline (design.md §9)                               */
+/* ------------------------------------------------------------------ */
+
+@layer base {
+  html {
+    /* Closed side sheet sits off-screen; never let it widen the page. */
+    overflow-x: clip;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text-2);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  button,
+  a,
+  [role="button"],
+  [role="slider"] {
+    touch-action: manipulation;
+  }
+
+  button,
+  [role="slider"] {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-steel) 40%, transparent);
+  }
+}
+
+/* Theme toggle: colors cross-fade, no flash (§8). */
+.theming,
+.theming *,
+.theming *::before,
+.theming *::after {
+  transition:
+    background-color 200ms ease,
+    color 200ms ease,
+    box-shadow 200ms ease,
+    fill 200ms ease,
+    stroke 200ms ease !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Type scale (design.md §3)                                           */
+/* ------------------------------------------------------------------ */
+
+@utility t-display {
+  font-family: var(--font-display);
+  font-size: clamp(2.75rem, 6vw, 4.5rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  font-weight: 600;
+}
+@utility t-title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3.5vw, 2.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+}
+@utility t-summary {
+  font-family: var(--font-display);
+  font-size: 1.5625rem;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  font-weight: 500;
+}
+@utility t-heading {
+  font-family: var(--font-sans);
+  font-size: 1.25rem;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+@utility t-body {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+@utility t-small {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+}
+@utility t-micro {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  font-weight: 500;
+}
+@utility t-code {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* Press feedback: scale on press, colour on hover (§7). */
+@utility press {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Glass material (design.md §5)                                       */
+/* ------------------------------------------------------------------ */
+
+.glass {
+  --glass-blur: 20px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--glass-shadow);
+}
+.glass-thick {
+  --glass-blur: 24px;
+}
+.glass-thin {
+  --glass-blur: 16px;
+}
+/* Bars that span the viewport: scroll edge, not divider. */
+.glass-flat {
+  box-shadow: var(--glass-highlight);
+}
+
+/* Never glass on glass: a toast over the open sheet goes solid. */
+html[data-sheet-open] .glass.toast {
+  background: var(--surface-2);
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    background: var(--surface-2);
+    backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .glass {
+    background: var(--surface-1);
+    box-shadow: 0 0 0 1px var(--text-3);
+    backdrop-filter: none;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: var(--surface-2);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Level swap: every level is stacked in one grid cell, so the        */
+/* container is always as tall as the longest text and never jumps.   */
+/* ------------------------------------------------------------------ */
+
+.swap {
+  display: grid;
+}
+.swap > * {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--swap-dur, 200ms) ease,
+    filter var(--swap-dur, 200ms) ease,
+    visibility 0s linear 0s;
+}
+.swap > [data-active="false"] {
+  opacity: 0;
+  filter: blur(var(--swap-blur, 2px));
+  visibility: hidden;
+  pointer-events: none;
+  transition-delay: 0s, 0s, var(--swap-dur, 200ms);
+}
+.swap-inline {
+  display: inline-grid;
+}
+/* Keyboard changes are instant: a 100ms opacity fade only (§7). */
+[data-swap-source="keyboard"] {
+  --swap-dur: 100ms;
+  --swap-blur: 0px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Inline editing (engineer review)                                    */
+/* ------------------------------------------------------------------ */
+
+.editable {
+  border-radius: var(--radius-xs);
+  margin: -4px -8px;
+  padding: 4px 8px;
+  outline: none;
+  cursor: text;
+  transition: box-shadow 150ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .editable:hover {
+    box-shadow: 0 0 0 1px var(--ring-strong);
+  }
+}
+.editable:focus {
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+/* ------------------------------------------------------------------ */
+/* Bridge Slider thumb: bigger hit area on touch                       */
+/* ------------------------------------------------------------------ */
+
+.slider-thumb::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 999px;
+}
+@media (pointer: coarse) {
+  .slider-thumb {
+    width: 28px;
+    height: 28px;
+  }
+  .slider-thumb::before {
+    inset: -10px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Tooltip (Base UI)                                                   */
+/* ------------------------------------------------------------------ */
+
+.tooltip {
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity var(--dur-tooltip) var(--ease-out),
+    transform var(--dur-tooltip) var(--ease-out);
+}
+.tooltip[data-starting-style],
+.tooltip[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.97);
+}
+.tooltip[data-instant] {
+  transition: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ask Why side sheet: materializes from the right (§8)               */
+/* ------------------------------------------------------------------ */
+
+.sheet {
+  transform: translateX(calc(100% + 16px));
+  opacity: 0;
+  visibility: hidden;
+  --glass-blur: 0px;
+  transition:
+    transform 220ms var(--ease-drawer),
+    opacity 220ms var(--ease-drawer),
+    backdrop-filter 220ms var(--ease-drawer),
+    visibility 0s linear 220ms;
+}
+.sheet[data-open="true"] {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  --glass-blur: 24px;
+  transition:
+    transform var(--dur-panel) var(--ease-drawer),
+    opacity var(--dur-panel) var(--ease-drawer),
+    backdrop-filter var(--dur-panel) var(--ease-drawer),
+    visibility 0s linear 0s;
+}
+
+/* Glass panels that dock in: opacity + blur + slight scale together. */
+.materialize {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.99);
+  visibility: hidden;
+  transition:
+    opacity 150ms var(--ease-out),
+    transform 150ms var(--ease-out),
+    visibility 0s linear 150ms;
+}
+.materialize[data-visible="true"] {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition:
+    opacity var(--dur-menu) var(--ease-out),
+    transform var(--dur-menu) var(--ease-out),
+    visibility 0s linear 0s;
+}
+
+/* ------------------------------------------------------------------ */
+/* Flowchart (Mermaid output, themed through tokens)                  */
+/* ------------------------------------------------------------------ */
+
+.flow svg {
+  display: block;
+  margin-inline: auto;
+  overflow: visible;
+}
+.flow .node rect,
+.flow .node polygon,
+.flow .node path.basic {
+  fill: var(--surface-2) !important;
+  stroke: var(--ring-strong) !important;
+  stroke-width: 1px !important;
+  rx: 10px;
+  ry: 10px;
+  transition:
+    stroke 150ms ease,
+    fill 150ms ease;
+}
+.flow .nodeLabel,
+.flow .nodeLabel *,
+.flow .node .label {
+  color: var(--text-2) !important;
+  fill: var(--text-2) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 14px !important;
+  line-height: 1.35 !important;
+}
+.flow[data-panel="after"] .nodeLabel,
+.flow[data-panel="after"] .nodeLabel * {
+  color: var(--text-1) !important;
+}
+.flow[data-panel="after"] .node.changed rect {
+  stroke: var(--color-steel) !important;
+  stroke-width: 2px !important;
+}
+.flow .flowchart-link {
+  stroke: var(--text-3) !important;
+}
+.flow marker path,
+.flow .arrowheadPath,
+.flow .arrowMarkerPath {
+  fill: var(--text-3) !important;
+  stroke: var(--text-3) !important;
+}
+.flow .node[data-ask] {
+  cursor: pointer;
+  outline: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .flow .node[data-ask]:hover rect {
+    stroke: var(--text-3) !important;
+  }
+  .flow[data-panel="after"] .node.changed[data-ask]:hover rect {
+    stroke: var(--color-mist) !important;
+  }
+}
+.flow .node[data-ask]:focus-visible rect {
+  stroke: var(--focus) !important;
+  stroke-width: 2px !important;
+}
+.flow foreignObject {
+  overflow: visible;
+}
+
+/* ------------------------------------------------------------------ */
+/* Spinner: 600ms per turn                                             */
+/* ------------------------------------------------------------------ */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  animation: spin 600ms linear infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion: gentler, not none (§8)                              */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-property: opacity, color, background-color !important;
+    animation: none !important;
+  }
+  [data-swap-source],
+  .swap {
+    --swap-blur: 0px;
+  }
+  .sheet,
+  .sheet[data-open="true"],
+  .materialize,
+  .materialize[data-visible="true"] {
+    transform: none;
+  }
+}
